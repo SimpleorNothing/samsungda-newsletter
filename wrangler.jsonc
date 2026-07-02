@@ -10,7 +10,8 @@
     "crons": ["45 22 * * 1-5"]
   },
   "vars": {
-    "FROM": "기획 도구모음 <newsletter@samsungda.net>"
+    "FROM": "기획 도구모음 <newsletter@samsungda.net>",
+    "PUBLIC_URL": "https://samsungda-newsletter.cw120-park.workers.dev"
   },
   "observability": { "enabled": true }
 }
