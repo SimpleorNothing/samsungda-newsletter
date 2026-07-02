@@ -428,7 +428,7 @@ export function renderEmail(data) {
         <span style="font-size:12px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
 
-  const section = (title, body, extra) => `<tr><td style="padding:18px 22px 0">
+  const section = (title, body, extra, first) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>
       <div style="margin-top:8px">${body}</div></td></tr>`;
 
@@ -450,7 +450,7 @@ export function renderEmail(data) {
         <div style="margin-top:8px;padding-top:8px;border-top:1px solid ${T.border};font-size:14px;font-weight:700;color:${T.text};line-height:1.5">${esc(sm.news)}</div>
       </div>
     </td></tr>
-    ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월")}
+    ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월", true)}
     ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월")}
     ${section("경쟁사 주가", comp, "전일 대비")}
     ${section("가전 주요뉴스", newsRows)}
