@@ -1,0 +1,1 @@
+# samsungda-newsletter
