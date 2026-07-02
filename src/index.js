@@ -6,6 +6,7 @@
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
+// 히어로: Claude API(claude-sonnet-4-5) 한 줄 요약. ANTHROPIC_API_KEY 없으면 규칙 기반 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 
@@ -196,7 +197,9 @@ async function gatherData(env) {
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
   const compData = compAll.map((c, i) => ({ ...c, q: comp[i] }));
-  return { date: kstDate(), q, comp: compData, macro, scfi, news, ideas, reports };
+  const data = { date: kstDate(), q, comp: compData, macro, scfi, news, ideas, reports };
+  data.summary = await aiSummary(env, data);
+  return data;
 }
 async function buildEmail(env) {
   return renderEmail(await gatherData(env)).split("__UNSUB__").join("#");
@@ -288,6 +291,64 @@ async function getReports(env) {
 }
 function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s; } }
 
+// ---------- AI 한 줄 요약 ----------
+const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 100;
+function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
+function summaryContext(data) {
+  const q = data.q, m = data.macro, s = data.scfi, L = [];
+  if (q["KRW=X"]) L.push(`원/달러 ${q["KRW=X"].price.toFixed(1)} (전일 ${sPct(pctOf(q["KRW=X"].price, q["KRW=X"].prevDay))})`);
+  if (q["MXN=X"]) L.push(`페소 ${q["MXN=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["MXN=X"].price, q["MXN=X"].prevDay))})`);
+  if (q["THB=X"]) L.push(`바트 ${q["THB=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["THB=X"].price, q["THB=X"].prevDay))})`);
+  if (q["CL=F"]) L.push(`WTI ${q["CL=F"].price.toFixed(1)} (전일 ${sPct(pctOf(q["CL=F"].price, q["CL=F"].prevDay))})`);
+  if (q["HG=F"]) L.push(`구리 ${q["HG=F"].price.toFixed(2)} (전월 ${sPct(pctOf(q["HG=F"].price, q["HG=F"].prevMonth))})`);
+  if (m.ironore) L.push(`철광석 전월 ${sPct(m.ironore.mom)}`);
+  if (s && s.value != null) L.push(`SCFI ${s.value}`);
+  if (q["^TNX"]) L.push(`美10Y ${q["^TNX"].price.toFixed(2)}%`);
+  if (m.cpiUS) L.push(`美CPI 전년 ${sPct(m.cpiUS.yoy)}`);
+  if (m.cpiKR) L.push(`韓CPI 전년 ${sPct(m.cpiKR.yoy)}`);
+  if (m.umich) L.push(`美소비심리 ${m.umich.val.toFixed(1)}`);
+  const comps = (data.comp || []).map(c => c.q ? { n: c.n, d: pctOf(c.q.price, c.q.prevDay) } : null).filter(x => x && x.d != null);
+  if (comps.length) { comps.sort((a, b) => Math.abs(b.d) - Math.abs(a.d)); L.push(`경쟁사 최대변동 ${comps[0].n} ${sPct(comps[0].d)} (전일)`); }
+  const heads = (data.news || []).slice(0, 3).map(n => `「${n.headline}」`).join(" ");
+  return `[오늘 지표]\n- ${L.join("\n- ")}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
+}
+function ruleSummary(data) {
+  const q = data.q, seg = [];
+  const add = (nm, v) => { if (v != null) seg.push(`${nm} ${v >= 0 ? "▲" : "▼"}${Math.abs(v).toFixed(1)}%`); };
+  if (q["KRW=X"]) add("원/달러", pctOf(q["KRW=X"].price, q["KRW=X"].prevDay));
+  if (q["CL=F"]) add("WTI", pctOf(q["CL=F"].price, q["CL=F"].prevDay));
+  if (q["HG=F"]) add("구리", pctOf(q["HG=F"].price, q["HG=F"].prevMonth));
+  const nc = (data.news || []).length;
+  const head = seg.slice(0, 3).join(" · ");
+  return `${head}${head ? " — " : ""}가전뉴스 ${nc}건`;
+}
+async function aiSummary(env, data) {
+  if (env && env.ANTHROPIC_API_KEY) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 150,
+          system: "삼성전자 생활가전 기획자를 위한 데일리 브리핑의 '오늘의 한 줄 요약'을 쓴다. 제공된 지표·뉴스만 근거로 한국어 한 문장(60자 내외)으로 원가·소비·경쟁 동향의 핵심을 짚는다. 추측·과장 금지, 수치는 자연스럽게 녹인다. 마지막에 마침표 없이 명사형 마무리.",
+          messages: [{ role: "user", content: summaryContext(data) }],
+        }),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        const t = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+        if (t) return t.replace(/\s+/g, " ").slice(0, 140);
+      }
+    } catch { /* 폴백 */ }
+  }
+  return ruleSummary(data);
+}
+
 // ---------- 렌더 ----------
 export function renderEmail(data) {
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -371,9 +432,16 @@ export function renderEmail(data) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-radius:14px;overflow:hidden">
-    <tr><td style="padding:22px 22px 14px;border-bottom:1px solid ${T.border}">
-      <div style="font-size:18px;font-weight:800;color:${T.text}">📊 기획 데일리</div>
-      <div style="margin-top:2px;font-size:13px;color:${T.muted}">${esc(data.date)} · 기획 도구모음</div>
+    <tr><td style="padding:24px 22px 16px;border-bottom:1px solid ${T.border};text-align:center">
+      <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
+      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} · SAMSUNG DA 기획 도구모음</div>
+      <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 경쟁사 · 뉴스 · 아이디어 · 보고서</div>
+    </td></tr>
+    <tr><td style="padding:18px 22px 2px">
+      <div style="background:${T.bg};border:1px solid ${T.border};border-radius:12px;padding:16px 18px;text-align:center">
+        <div style="font-size:10px;font-weight:800;color:${T.brand};letter-spacing:.12em">오늘의 한 줄</div>
+        <div style="margin-top:8px;font-size:15px;font-weight:700;color:${T.text};line-height:1.55">${esc(data.summary || "")}</div>
+      </div>
     </td></tr>
     ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월")}
     ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월")}
@@ -381,9 +449,8 @@ export function renderEmail(data) {
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
-    <tr><td style="padding:20px 22px 22px">
-      <a href="https://samsungda.net" style="color:${T.brand};text-decoration:none;font-size:13px;font-weight:600">도구모음 열기 →</a>
-      <div style="margin-top:10px;font-size:11px;color:${T.muted}">기획 도구모음 자동 발송 · <a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+    <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
+      <div style="font-size:11px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
