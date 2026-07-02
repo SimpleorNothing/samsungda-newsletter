@@ -6,7 +6,7 @@
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
-// 히어로: Claude API(claude-sonnet-4-5) 한 줄 요약. ANTHROPIC_API_KEY 없으면 규칙 기반 폴백. CTA 없음.
+// 히어로: Claude API(claude-sonnet-4-5) 2줄 요약(1줄 소비·원가 / 2줄 가전뉴스). 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 
@@ -318,9 +318,10 @@ function ruleSummary(data) {
   if (q["KRW=X"]) add("원/달러", pctOf(q["KRW=X"].price, q["KRW=X"].prevDay));
   if (q["CL=F"]) add("WTI", pctOf(q["CL=F"].price, q["CL=F"].prevDay));
   if (q["HG=F"]) add("구리", pctOf(q["HG=F"].price, q["HG=F"].prevMonth));
-  const nc = (data.news || []).length;
-  const head = seg.slice(0, 3).join(" · ");
-  return `${head}${head ? " — " : ""}가전뉴스 ${nc}건`;
+  const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 원가·소비 지표 점검` : "원가·소비 지표 데이터 수집 지연";
+  const nc = (data.news || []).length, top = (data.news || [])[0];
+  const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
+  return { macro, news };
 }
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
@@ -334,15 +335,19 @@ async function aiSummary(env, data) {
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
-          max_tokens: 150,
-          system: "삼성전자 생활가전 기획자를 위한 데일리 브리핑의 '오늘의 한 줄 요약'을 쓴다. 제공된 지표·뉴스만 근거로 한국어 한 문장(60자 내외)으로 원가·소비·경쟁 동향의 핵심을 짚는다. 추측·과장 금지, 수치는 자연스럽게 녹인다. 마지막에 마침표 없이 명사형 마무리.",
+          max_tokens: 220,
+          system: "삼성전자 생활가전 기획자를 위한 데일리 브리핑의 '오늘의 한 줄'을 쓴다. 정확히 2줄로 답한다. 1줄차: 소비·원가(환율·유가·금리·물가·원자재·운임) 동향을 한국어 한 문장(50자 내외). 2줄차: 가전 주요뉴스 핵심을 한 문장(50자 내외). 각 줄에 라벨·번호·따옴표·마침표 없이, 명사형 마무리. 제공된 데이터만 근거, 추측·과장 금지. 뉴스가 없으면 2줄차는 '신규 가전뉴스 없음'.",
           messages: [{ role: "user", content: summaryContext(data) }],
         }),
       });
       if (res.ok) {
         const j = await res.json();
         const t = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-        if (t) return t.replace(/\s+/g, " ").slice(0, 140);
+        const lines = t.split(/\r?\n/).map(x => x.replace(/^[\s\-*•\d.)]+/, "").trim()).filter(Boolean);
+        if (lines.length) {
+          const rs = ruleSummary(data);
+          return { macro: (lines[0] || rs.macro).slice(0, 120), news: (lines[1] || rs.news).slice(0, 120) };
+        }
       }
     } catch { /* 폴백 */ }
   }
@@ -361,6 +366,7 @@ export function renderEmail(data) {
   const lbl = t => `<span style="color:${T.muted}">${t}</span>`;
   const dot = ' <span style="color:' + T.border + '">·</span> ';
   const q = data.q, m = data.macro, s = data.scfi;
+  const sm = (data.summary && typeof data.summary === "object") ? data.summary : { macro: String(data.summary || ""), news: "" };
 
   // 원가 (전부 MoM)
   const fxParts = [
@@ -440,7 +446,8 @@ export function renderEmail(data) {
     <tr><td style="padding:18px 22px 2px">
       <div style="background:${T.bg};border:1px solid ${T.border};border-radius:12px;padding:16px 18px;text-align:center">
         <div style="font-size:10px;font-weight:800;color:${T.brand};letter-spacing:.12em">오늘의 한 줄</div>
-        <div style="margin-top:8px;font-size:15px;font-weight:700;color:${T.text};line-height:1.55">${esc(data.summary || "")}</div>
+        <div style="margin-top:9px;font-size:14px;font-weight:700;color:${T.text};line-height:1.5">${esc(sm.macro)}</div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid ${T.border};font-size:14px;font-weight:700;color:${T.text};line-height:1.5">${esc(sm.news)}</div>
       </div>
     </td></tr>
     ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월")}
