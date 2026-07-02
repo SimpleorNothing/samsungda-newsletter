@@ -7,7 +7,7 @@
 //  4) 클로드 보고서  : R2 samsungda-research 루트 업로드(docx), customMetadata.title
 //
 // 구독: R2 "subscribers/<sha256(email)>.json".  발송: Resend(수신자별 개별 발송).
-// 라우트: POST /subscribe · GET /unsubscribe · /preview · /send?key= · /latest
+// 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 // R2 바인딩: RESEARCH → samsungda-research
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
@@ -46,6 +46,18 @@ export default {
       if (env.TRIGGER_KEY && url.searchParams.get("key") !== env.TRIGGER_KEY)
         return new Response("forbidden", { status: 403 });
       return json(await run(env, { send: true }));
+    }
+    if (url.pathname === "/subscribers") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      const subs = await getSubscribers(env);
+      const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
+      const out = [];
+      for (const email of subs) {
+        const t = await signToken(email, signKey(env));
+        out.push({ email, unsubscribe: pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${t}` : null });
+      }
+      return json({ count: out.length, subscribers: out });
     }
     if (url.pathname === "/" || url.pathname === "/latest") {
       const obj = await env.RESEARCH.get(NL_PREFIX + "latest.html");
