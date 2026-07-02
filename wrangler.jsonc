@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "samsungda-newsletter",
+  "main": "src/index.js",
+  "compatibility_date": "2025-06-01",
+  "r2_buckets": [
+    { "binding": "RESEARCH", "bucket_name": "samsungda-research" }
+  ],
+  "triggers": {
+    "crons": ["45 22 * * 1-5"]
+  },
+  "vars": {
+    "FROM": "기획 도구모음 <newsletter@samsungda.net>"
+  },
+  "observability": { "enabled": true }
+}
