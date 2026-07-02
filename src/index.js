@@ -1,6 +1,6 @@
 // samsungda-newsletter — 기획 데일리 (Cloudflare Worker + Cron)
 //
-// 콘텐츠: [원가] 환율(원/페소/바트)·유가(WTI)·원자재(구리·철광석)·운임(SCFI) — 전부 MoM
+// 콘텐츠: [원가] 환율·유가(전일)·원자재·운임(전월)
 //         [소비] 금리 美10Y(전일)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
 //         [경쟁사] 가전(WHR·LG·Midea·Haier·SharkNinja)·HVAC(Carrier·Trane·Daikin) 전일 대비
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
@@ -303,9 +303,9 @@ export function renderEmail(data) {
 
   // 원가 (전부 MoM)
   const fxParts = [
-    q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${mom(q["KRW=X"])}` : null,
-    q["MXN=X"] ? `페소 <b>${fmt(q["MXN=X"].price)}</b>${mom(q["MXN=X"])}` : null,
-    q["THB=X"] ? `바트 <b>${fmt(q["THB=X"].price)}</b>${mom(q["THB=X"])}` : null,
+    q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${dchg(q["KRW=X"])}` : null,
+    q["MXN=X"] ? `페소 <b>${fmt(q["MXN=X"].price)}</b>${dchg(q["MXN=X"])}` : null,
+    q["THB=X"] ? `바트 <b>${fmt(q["THB=X"].price)}</b>${dchg(q["THB=X"])}` : null,
   ].filter(Boolean).join(dot);
   const matParts = [
     q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${mom(q["HG=F"])}` : null,
@@ -316,22 +316,22 @@ export function renderEmail(data) {
     : `<b>—</b> <span style="color:${T.muted};font-size:12px">(수동 갱신)</span>`;
   const cost = [
     fxParts ? line(`${lbl("환율")} ${fxParts}`) : "",
-    q["CL=F"] ? line(`${lbl("유가")} WTI <b>$${fmt(q["CL=F"].price)}</b>${mom(q["CL=F"])}`) : "",
+    q["CL=F"] ? line(`${lbl("유가")} WTI <b>$${fmt(q["CL=F"].price)}</b>${dchg(q["CL=F"])}`) : "",
     matParts ? line(`${lbl("원자재")} ${matParts}`) : "",
     line(`${lbl("운임")} SCFI ${scfiVal}`),
   ].join("");
 
   // 소비
   const bp = q["^TNX"] && q["^TNX"].prevDay != null ? Math.round((q["^TNX"].price - q["^TNX"].prevDay) * 100) : null;
-  const yoyTxt = st => st && st.yoy != null ? `<b>${st.yoy >= 0 ? "+" : ""}${st.yoy.toFixed(1)}% YoY</b> <span style="color:${T.muted};font-size:12px">(${st.date})</span>` : "<b>—</b>";
+  const yoyTxt = st => st && st.yoy != null ? `<b>${st.yoy >= 0 ? "+" : ""}${st.yoy.toFixed(1)}%</b> <span style="color:${T.muted};font-size:12px">(${st.date})</span>` : "<b>—</b>";
   const consume = [
-    q["^TNX"] ? line(`${lbl("금리")} 美 10Y <b>${fmt(q["^TNX"].price)}%</b>${bp != null ? ` <span style="color:${bp >= 0 ? T.up : T.down};font-weight:600">${bp >= 0 ? "▲" : "▼"}${Math.abs(bp)}bp</span>` : ""} <span style="color:${T.muted};font-size:12px">(전일)</span>`) : "",
+    q["^TNX"] ? line(`${lbl("금리")} 美 10Y <b>${fmt(q["^TNX"].price)}%</b>${bp != null ? ` <span style="color:${bp >= 0 ? T.up : T.down};font-weight:600">${bp >= 0 ? "▲" : "▼"}${Math.abs(bp)}bp</span>` : ""}`) : "",
     line(`${lbl("물가")} 美 CPI ${yoyTxt(m.cpiUS)}${dot}PCE ${yoyTxt(m.pce)}${dot}韓 CPI ${yoyTxt(m.cpiKR)}`),
     m.houst || m.exhome ? line(`${lbl("주택")} ${[
       m.houst ? `착공 <b>${fmt(m.houst.val, 0)}K</b>${arrow(m.houst.mom)}` : null,
       m.exhome ? `기존판매 <b>${fmt(m.exhome.val / 1e6, 2)}M</b>${arrow(m.exhome.mom)}` : null,
-    ].filter(Boolean).join(dot)} <span style="color:${T.muted};font-size:12px">(MoM)</span>`) : "",
-    m.umich ? line(`${lbl("심리")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:12px">(${m.umich.date}·MoM)</span>`) : "",
+    ].filter(Boolean).join(dot)} <span style="color:${T.muted};font-size:12px">(${(m.houst || m.exhome).date})</span>`) : "",
+    m.umich ? line(`${lbl("심리")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:12px">(${m.umich.date})</span>`) : "",
   ].join("");
 
   // 경쟁사 (전일 대비)
@@ -375,8 +375,8 @@ export function renderEmail(data) {
       <div style="font-size:18px;font-weight:800;color:${T.text}">📊 기획 데일리</div>
       <div style="margin-top:2px;font-size:13px;color:${T.muted}">${esc(data.date)} · 기획 도구모음</div>
     </td></tr>
-    ${section("원가", cost, "환율·유가·원자재·물류 · MoM")}
-    ${section("소비", consume, "금리·물가·주택·심리")}
+    ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월")}
+    ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월")}
     ${section("경쟁사 주가", comp, "전일 대비")}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
@@ -387,7 +387,7 @@ export function renderEmail(data) {
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
-    지표 출처: Yahoo Finance(환율·유가·구리·금리·주가), FRED(CPI·PCE·주택·소비심리·철광석). 원가는 1개월 전 대비(MoM), 월간 지표는 최신 발표월 기준.
+    지표 출처: Yahoo Finance(환율·유가·구리·금리·주가), FRED(CPI·PCE·주택·소비심리·철광석). 비교시점: 원가 환율·유가·경쟁사 전일, 원가 원자재·운임 전월, 소비 금리 전일·물가 전년·주택·심리 전월. 월간지표는 최신 발표월 기준.
   </div>
 </td></tr>
 </table>
