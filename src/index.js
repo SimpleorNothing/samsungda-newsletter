@@ -202,7 +202,7 @@ async function gatherData(env) {
   return data;
 }
 async function buildEmail(env) {
-  return renderEmail(await gatherData(env)).split("__UNSUB__").join("#");
+  return renderEmail(await gatherData(env), { sample: true }).split("__UNSUB__").join("#");
 }
 
 // Yahoo 차트: 최근 3개월 일봉 → 최신·전일·1개월전(≈21거래일)
@@ -355,7 +355,7 @@ async function aiSummary(env, data) {
 }
 
 // ---------- 렌더 ----------
-export function renderEmail(data) {
+export function renderEmail(data, opts = {}) {
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const arrow = d => d == null ? "" : ` <span style="color:${d >= 0 ? T.up : T.down};font-weight:600">${d >= 0 ? "▲" : "▼"}${Math.abs(d).toFixed(2)}%</span>`;
   const chg = (cur, base) => (cur == null || base == null || !base) ? "" : arrow((cur - base) / base * 100);
@@ -435,6 +435,7 @@ export function renderEmail(data) {
   return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:${T.bg};font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
+${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.brand};color:#fff;font-size:11px;font-weight:800;letter-spacing:.14em;padding:5px 11px;border-radius:6px;box-shadow:0 2px 8px rgba(18,87,214,.35)">SAMPLE</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-radius:14px;overflow:hidden">
