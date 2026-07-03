@@ -6,7 +6,8 @@
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
-// 히어로: Claude API(claude-sonnet-4-5) 2줄 요약(1줄 소비·원가 / 2줄 가전뉴스). 키 없으면 규칙 폴백. CTA 없음.
+// 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
+//         + 소비/원가/경쟁사 섹션별 해석 한 줄 + 뉴스별 so-what 한 줄. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 
@@ -291,7 +292,7 @@ async function getReports(env) {
 }
 function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s; } }
 
-// ---------- AI 한 줄 요약 ----------
+// ---------- AI 맥락 브리핑 ----------
 const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 100;
 function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
 function summaryContext(data) {
@@ -309,7 +310,7 @@ function summaryContext(data) {
   if (m.umich) L.push(`美소비심리 ${m.umich.val.toFixed(1)}`);
   const comps = (data.comp || []).map(c => c.q ? { n: c.n, d: pctOf(c.q.price, c.q.prevDay) } : null).filter(x => x && x.d != null);
   if (comps.length) { comps.sort((a, b) => Math.abs(b.d) - Math.abs(a.d)); L.push(`경쟁사 최대변동 ${comps[0].n} ${sPct(comps[0].d)} (전일)`); }
-  const heads = (data.news || []).slice(0, 3).map(n => `「${n.headline}」`).join(" ");
+  const heads = (data.news || []).map((n, i) => `${i}. 「${n.headline}」 (${n.grade}·${n.lens})`).join("\n");
   return `[오늘 지표]\n- ${L.join("\n- ")}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
 }
 function ruleSummary(data) {
@@ -321,7 +322,7 @@ function ruleSummary(data) {
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 원가·소비 지표 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
-  return { macro, news };
+  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "", comp: "" }, newsWhy: {} };
 }
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
@@ -335,19 +336,39 @@ async function aiSummary(env, data) {
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
-          max_tokens: 220,
-          system: "삼성전자 생활가전 기획자를 위한 데일리 브리핑의 '오늘의 한 줄'을 쓴다. 정확히 2줄로 답한다. 1줄차: 소비·원가(환율·유가·금리·물가·원자재·운임) 동향을 한국어 한 문장(50자 내외). 2줄차: 가전 주요뉴스 핵심을 한 문장(50자 내외). 각 줄에 라벨·번호·따옴표·마침표 없이, 명사형 마무리. 제공된 데이터만 근거, 추측·과장 금지. 뉴스가 없으면 2줄차는 '신규 가전뉴스 없음'.",
+          max_tokens: 900,
+          system: [
+            "삼성전자 생활가전(DA) 기획자를 위한 데일리 브리핑을 쓴다.",
+            "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
+            "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
+            '{"hero":"...","consume":"...","cost":"...","comp":"...","news":[{"idx":0,"why":"..."}]}',
+            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 180자 이내). 지표 간 연결(예: 환율 상승→수입 원가 부담)과 기획 관점의 함의를 담는다.",
+            "- consume: 소비 환경(금리·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(55자 이내, 명사형 마무리).",
+            "- cost: 원가 환경(환율·유가·원자재·운임)이 손익에 갖는 의미 한 문장(55자 이내, 명사형 마무리).",
+            "- comp: 경쟁사 주가 움직임의 해석 한 문장(55자 이내, 명사형 마무리). 유의미한 변동이 없으면 빈 문자열.",
+            "- news: 제공된 뉴스 각각에 대해 DA 관점에서 왜 중요한지 한 문장(idx는 뉴스 번호, why는 50자 이내). 뉴스가 없으면 빈 배열.",
+            "- 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열.",
+          ].join("\n"),
           messages: [{ role: "user", content: summaryContext(data) }],
         }),
       });
       if (res.ok) {
         const j = await res.json();
         const t = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-        const lines = t.split(/\r?\n/).map(x => x.replace(/^[\s\-*•\d.)]+/, "").trim()).filter(Boolean);
-        if (lines.length) {
-          const rs = ruleSummary(data);
-          return { macro: (lines[0] || rs.macro).slice(0, 120), news: (lines[1] || rs.news).slice(0, 120) };
+        const raw = t.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(raw);
+        const str = (v, n) => typeof v === "string" ? v.trim().slice(0, n) : "";
+        const newsWhy = {};
+        for (const it of (Array.isArray(parsed.news) ? parsed.news : [])) {
+          if (it && Number.isInteger(it.idx) && typeof it.why === "string" && it.why.trim())
+            newsWhy[it.idx] = it.why.trim().slice(0, 100);
         }
+        const hero = str(parsed.hero, 260);
+        if (hero) return {
+          hero,
+          sec: { consume: str(parsed.consume, 90), cost: str(parsed.cost, 90), comp: str(parsed.comp, 90) },
+          newsWhy,
+        };
       }
     } catch { /* 폴백 */ }
   }
@@ -366,7 +387,9 @@ export function renderEmail(data, opts = {}) {
   const lbl = t => `<span style="color:${T.muted}">${t}</span>`;
   const dot = ' <span style="color:' + T.border + '">·</span> ';
   const q = data.q, m = data.macro, s = data.scfi;
-  const sm = (data.summary && typeof data.summary === "object") ? data.summary : { macro: String(data.summary || ""), news: "" };
+  const sm0 = (data.summary && typeof data.summary === "object") ? data.summary : { hero: String(data.summary || "") };
+  const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
+  const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};border-radius:0 8px 8px 0;font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
 
   // 원가 (전부 MoM)
   const fxParts = [
@@ -410,8 +433,9 @@ export function renderEmail(data, opts = {}) {
 
   // 콘텐츠
   const newsRows = data.news.length
-    ? data.news.map(i => `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
+    ? data.news.map((i, ni) => `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>
+        ${sm.newsWhy[ni] ? `<div style="margin-top:4px;font-size:13px;color:${T.text};line-height:1.5"><span style="color:${T.brand};font-weight:700">↳</span> ${esc(sm.newsWhy[ni])}</div>` : ""}
         <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
@@ -428,8 +452,8 @@ export function renderEmail(data, opts = {}) {
         <span style="font-size:12px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
 
-  const section = (title, body, extra, first) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
-      <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>
+  const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
+      <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
       <div style="margin-top:8px">${body}</div></td></tr>`;
 
   return `<!DOCTYPE html>
@@ -445,15 +469,14 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 경쟁사 · 뉴스 · 아이디어 · 보고서</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
-      <div style="background:${T.bg};border:1px solid ${T.border};border-radius:12px;padding:16px 18px;text-align:center">
-        <div style="font-size:10px;font-weight:800;color:${T.brand};letter-spacing:.12em">오늘의 한 줄</div>
-        <div style="margin-top:9px;font-size:14px;font-weight:700;color:${T.text};line-height:1.5">${esc(sm.macro)}</div>
-        <div style="margin-top:8px;padding-top:8px;border-top:1px solid ${T.border};font-size:14px;font-weight:700;color:${T.text};line-height:1.5">${esc(sm.news)}</div>
+      <div style="background:${T.bg};border:1px solid ${T.border};border-radius:12px;padding:16px 18px">
+        <div style="font-size:10px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 맥락</div>
+        <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
     </td></tr>
-    ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월", true)}
-    ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월")}
-    ${section("경쟁사 주가", comp, "전일 대비")}
+    ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
+    ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월", false, sm.sec.cost)}
+    ${section("경쟁사 주가", comp, "전일 대비", false, sm.sec.comp)}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
