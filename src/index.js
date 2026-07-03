@@ -7,7 +7,7 @@
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
 // 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
-//         + 소비/원가/경쟁사 섹션별 해석 한 줄 + 뉴스별 so-what 한 줄. 키 없으면 규칙 폴백. CTA 없음.
+//         + 소비/원가/경쟁사 섹션별 해석 한 줄 + 뉴스별 so-what 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 
@@ -342,12 +342,14 @@ async function aiSummary(env, data) {
             "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
             '{"hero":"...","consume":"...","cost":"...","comp":"...","news":[{"idx":0,"why":"..."}]}',
-            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 180자 이내). 지표 간 연결(예: 환율 상승→수입 원가 부담)과 기획 관점의 함의를 담는다.",
-            "- consume: 소비 환경(금리·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(55자 이내, 명사형 마무리).",
-            "- cost: 원가 환경(환율·유가·원자재·운임)이 손익에 갖는 의미 한 문장(55자 이내, 명사형 마무리).",
-            "- comp: 경쟁사 주가 움직임의 해석 한 문장(55자 이내, 명사형 마무리). 유의미한 변동이 없으면 빈 문자열.",
-            "- news: 제공된 뉴스 각각에 대해 DA 관점에서 왜 중요한지 한 문장(idx는 뉴스 번호, why는 50자 이내). 뉴스가 없으면 빈 배열.",
-            "- 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열.",
+            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
+            "- consume: 소비 환경(금리·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
+            "- cost: 원가 환경(환율·유가·원자재·운임)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내.",
+            "- comp: 경쟁사 주가 움직임의 해석 한 문장(명사형 마무리) + 괄호로 근거(종목·변동률) 병기. 전체 75자 이내. 유의미한 변동이 없으면 빈 문자열.",
+            "- news: 제공된 뉴스 각각에 대해 DA 관점에서 왜 중요한지 한 문장(idx는 뉴스 번호, why는 55자 이내). 헤드라인→함의로 이어지는 이유('~이므로/~여서')를 담는다. 뉴스가 없으면 빈 배열.",
+            "- 추론 규율: 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열.",
+            "  · 지표에 직접 없는 수요·판매·점유율은 단정하지 말 것. 거시지표에서 유추한 판단은 근거 지표를 반드시 괄호 병기.",
+            "  · '지속'·'추세'·'회복' 같은 시계열 표현은 제공된 전일/전월/전년 델타로 뒷받침될 때만 사용. 스냅샷 하나로 추세를 단정하지 않는다.",
           ].join("\n"),
           messages: [{ role: "user", content: summaryContext(data) }],
         }),
@@ -363,10 +365,10 @@ async function aiSummary(env, data) {
           if (it && Number.isInteger(it.idx) && typeof it.why === "string" && it.why.trim())
             newsWhy[it.idx] = it.why.trim().slice(0, 100);
         }
-        const hero = str(parsed.hero, 260);
+        const hero = str(parsed.hero, 280);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 90), cost: str(parsed.cost, 90), comp: str(parsed.comp, 90) },
+          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120), comp: str(parsed.comp, 120) },
           newsWhy,
         };
       }
