@@ -1,6 +1,6 @@
 // samsungda-newsletter — 기획 데일리 (Cloudflare Worker + Cron)
 //
-// 콘텐츠: [원가] 환율·유가(전일)·원자재·운임(전월)
+// 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재·운임(전월)
 //         [소비] 금리 美10Y(전일)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
 //         [경쟁사] 가전(WHR·LG·Midea·Haier·SharkNinja)·HVAC(Carrier·Trane·Daikin) 전일 대비
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
@@ -185,7 +185,7 @@ async function run(env, { send }) {
 
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
-  const symbols = ["KRW=X", "MXN=X", "THB=X", "CL=F", "HG=F", "^TNX"];
+  const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX"];
   const compAll = [...COMP_APPLIANCE, ...COMP_HVAC];
   const [yq, comp, macro, scfi, news, ideas, reports] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
@@ -300,6 +300,9 @@ function summaryContext(data) {
   if (q["KRW=X"]) L.push(`원/달러 ${q["KRW=X"].price.toFixed(1)} (전일 ${sPct(pctOf(q["KRW=X"].price, q["KRW=X"].prevDay))})`);
   if (q["MXN=X"]) L.push(`페소 ${q["MXN=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["MXN=X"].price, q["MXN=X"].prevDay))})`);
   if (q["THB=X"]) L.push(`바트 ${q["THB=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["THB=X"].price, q["THB=X"].prevDay))})`);
+  if (q["VND=X"]) L.push(`동 ${q["VND=X"].price.toFixed(0)} (전일 ${sPct(pctOf(q["VND=X"].price, q["VND=X"].prevDay))})`);
+  if (q["INR=X"]) L.push(`루피 ${q["INR=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["INR=X"].price, q["INR=X"].prevDay))})`);
+  if (q["PLN=X"]) L.push(`즈워티 ${q["PLN=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["PLN=X"].price, q["PLN=X"].prevDay))})`);
   if (q["CL=F"]) L.push(`WTI ${q["CL=F"].price.toFixed(1)} (전일 ${sPct(pctOf(q["CL=F"].price, q["CL=F"].prevDay))})`);
   if (q["HG=F"]) L.push(`구리 ${q["HG=F"].price.toFixed(2)} (전월 ${sPct(pctOf(q["HG=F"].price, q["HG=F"].prevMonth))})`);
   if (m.ironore) L.push(`철광석 전월 ${sPct(m.ironore.mom)}`);
@@ -347,6 +350,11 @@ async function aiSummary(env, data) {
             "- cost: 원가 환경(환율·유가·원자재·운임)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내.",
             "- comp: 경쟁사 주가 움직임의 해석 한 문장(명사형 마무리) + 괄호로 근거(종목·변동률) 병기. 전체 75자 이내. 유의미한 변동이 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 DA 관점에서 왜 중요한지 한 문장(idx는 뉴스 번호, why는 55자 이내). 헤드라인→함의로 이어지는 이유('~이므로/~여서')를 담는다. 뉴스가 없으면 빈 배열.",
+            "- 환율 해석 원칙 (원가 관점 전용 — 매출·수출 채산성 언급 금지):",
+            "  · 모든 환율은 USD 대비 표기이며 수치 하락 = 해당 통화 강세.",
+            "  · 원/달러 하락(원화 강세) = 달러 결제 원자재·부품의 원화 환산 구매원가 하락 요인.",
+            "  · 생산거점 통화(페소=멕시코, 바트=태국, 동=베트남, 루피=인도, 즈워티=폴란드) 강세 = 현지 인건비·조달비의 달러 환산 상승 → 원가 '상승' 요인. 이 방향을 절대 뒤집지 말 것.",
+            "  · 원화 강세와 생산거점 통화 강세는 원가에 반대 방향으로 작용 — 함께 움직일 때 '전방위 원가 하락'으로 뭉뚱그리지 말고 구분해 서술.",
             "- 추론 규율: 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열.",
             "  · 지표에 직접 없는 수요·판매·점유율은 단정하지 말 것. 거시지표에서 유추한 판단은 근거 지표를 반드시 괄호 병기.",
             "  · '지속'·'추세'·'회복' 같은 시계열 표현은 제공된 전일/전월/전년 델타로 뒷받침될 때만 사용. 스냅샷 하나로 추세를 단정하지 않는다.",
@@ -398,6 +406,9 @@ export function renderEmail(data, opts = {}) {
     q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${dchg(q["KRW=X"])}` : null,
     q["MXN=X"] ? `페소 <b>${fmt(q["MXN=X"].price)}</b>${dchg(q["MXN=X"])}` : null,
     q["THB=X"] ? `바트 <b>${fmt(q["THB=X"].price)}</b>${dchg(q["THB=X"])}` : null,
+    q["VND=X"] ? `동 <b>${fmt(q["VND=X"].price, 0)}</b>${dchg(q["VND=X"])}` : null,
+    q["INR=X"] ? `루피 <b>${fmt(q["INR=X"].price)}</b>${dchg(q["INR=X"])}` : null,
+    q["PLN=X"] ? `즈워티 <b>${fmt(q["PLN=X"].price)}</b>${dchg(q["PLN=X"])}` : null,
   ].filter(Boolean).join(dot);
   const matParts = [
     q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${mom(q["HG=F"])}` : null,
