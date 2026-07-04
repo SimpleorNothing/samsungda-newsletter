@@ -199,6 +199,20 @@ export default {
       }
       return json({ count: out.length, subscribers: out });
     }
+    if (url.pathname === "/recipients") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      const stat = (env.RECIPIENTS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+      const subs = await getSubscribers(env);
+      const statSet = new Set(stat), subSet = new Set(subs);
+      const all = [...new Set([...stat, ...subs])];
+      const recipients = all.map(email => ({
+        email,
+        source: (statSet.has(email) && subSet.has(email)) ? "both"
+              : statSet.has(email) ? "fixed" : "subscribed",
+      }));
+      return json({ count: recipients.length, fixed: stat.length, subscribed: subs.length, recipients });
+    }
     if (url.pathname === "/" || url.pathname === "/archive") return htmlResp(await archivePage(env));
     if (url.pathname === "/latest") {
       const obj = await env.RESEARCH.get(NL_PREFIX + "latest.html");
