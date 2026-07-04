@@ -246,7 +246,61 @@ async function handleSubscribe(request, env) {
     await env.RESEARCH.put(await subKey(email), JSON.stringify({ email, createdAt: Date.now() }),
       { httpMetadata: { contentType: "application/json" } });
   } catch (e) { return json({ ok: false, error: "store_failed" }, 500); }
-  return json({ ok: true, email });
+  // 구독 확인(환영) 메일 발송 — 실패해도 구독 자체는 완료로 처리
+  let welcomed = false;
+  if (env.RESEND_API_KEY) {
+    try {
+      const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
+      const token = await signToken(email, signKey(env));
+      const link = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
+      const r = await sendResend(env, {
+        to: email,
+        subject: "✅ 기획 데일리 뉴스레터 구독이 시작되었습니다",
+        html: welcomeEmail(link, pub),
+      });
+      welcomed = r.ok;
+    } catch { /* 확인 메일 실패는 무시 */ }
+  }
+  return json({ ok: true, email, welcomed });
+}
+// Resend 단건 발송 헬퍼(구독 확인·데일리 공용)
+async function sendResend(env, { to, subject, html }) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [to], subject, html }),
+  });
+  if (res.ok) return { ok: true };
+  const j = await res.json().catch(() => ({}));
+  return { ok: false, error: j.message || res.status };
+}
+// 구독 확인(환영) 메일 — DA 토큰(흰 배경·#1257d6·라운드 카드), 이메일 호환 table+inline CSS
+function welcomeEmail(unsubLink, pub) {
+  const latest = pub ? `${pub}/latest` : "#";
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f6fb;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:24px 12px;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e6ebf5;border-radius:16px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Malgun Gothic','맑은 고딕',sans-serif;">
+<tr><td style="background:#1257d6;padding:22px 28px;">
+<div style="color:#ffffff;font-size:18px;font-weight:700;">기획 데일리</div>
+<div style="color:#cfe0ff;font-size:13px;margin-top:2px;">가전 기획 도구모음 · 데일리 브리핑</div>
+</td></tr>
+<tr><td style="padding:28px;">
+<div style="font-size:20px;font-weight:700;color:#111827;margin-bottom:10px;">구독이 시작되었습니다 🎉</div>
+<p style="font-size:15px;line-height:1.65;color:#374151;margin:0 0 14px;">뉴스레터 구독 신청이 정상적으로 완료되었습니다. 이제 <b>매일 아침(평일)</b> 시장지표·가전 주요뉴스·아이디어뱅크·보고서를 정리한 브리핑을 이 메일 주소로 받아보실 수 있습니다.</p>
+<p style="font-size:15px;line-height:1.65;color:#374151;margin:0 0 22px;">첫 호는 다음 발행일 아침에 도착합니다. 그동안 지난 뉴스레터를 먼저 살펴보셔도 좋습니다.</p>
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:10px;background:#1257d6;">
+<a href="${latest}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">최신 뉴스레터 보기</a>
+</td></tr></table>
+</td></tr>
+<tr><td style="padding:16px 28px 26px;border-top:1px solid #eef2f9;">
+<p style="font-size:12px;line-height:1.6;color:#9ca3af;margin:0;">본 메일은 구독 신청에 따라 발송되었습니다. 더 이상 받고 싶지 않으시면 <a href="${unsubLink}" style="color:#1257d6;text-decoration:underline;">구독 해지</a>를 눌러주세요.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
 }
 async function handleUnsub(url, env) {
   const email = String(url.searchParams.get("e") || "").trim().toLowerCase();
@@ -304,13 +358,9 @@ async function run(env, { send }) {
     const token = await signToken(email, signKey(env));
     const link = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
     const html = base.split("__UNSUB__").join(link);
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [email], subject, html }),
-    });
-    if (res.ok) sent++;
-    else { failed++; const j = await res.json().catch(() => ({})); errs.push(j.message || res.status); }
+    const r = await sendResend(env, { to: email, subject, html });
+    if (r.ok) sent++;
+    else { failed++; errs.push(r.error); }
   }
   return { ok: failed === 0, sent, failed, errors: errs.slice(0, 3) };
 }
