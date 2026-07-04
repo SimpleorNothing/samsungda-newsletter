@@ -274,15 +274,20 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 .tools{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;color:var(--muted);text-decoration:none;transition:color .15s}
 .tools:hover{color:var(--ink)}
 .tools svg{width:15px;height:15px;flex:0 0 auto}
-.foot{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start}
+.foot{position:relative;margin-top:32px;padding-top:16px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start}
 .upd{font:inherit;font-size:12px;color:var(--muted);background:none;border:none;padding:0;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
 .upd:hover{color:var(--ink)}
 .upd .cev{font-size:10px;transition:transform .15s}
 .upd.open .cev{transform:rotate(180deg)}
-.log{display:none;width:100%;margin-top:12px}
+.log{position:absolute;left:0;bottom:calc(100% + 10px);width:340px;max-width:80vw;max-height:52vh;overflow:auto;background:var(--surface);border:1px solid var(--line);box-shadow:0 12px 28px rgba(23,34,45,.16);padding:14px 14px 8px;z-index:50;display:none;animation:logrise .14s ease-out}
 .log.open{display:block}
-.log ul{list-style:none;display:flex;flex-direction:column;gap:10px}
-.log li{display:flex;gap:12px;font-size:12.5px;color:var(--muted);line-height:1.55}
+@keyframes logrise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.log-h{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700;color:var(--muted);margin-bottom:6px}
+.log-x{font:inherit;border:none;background:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:0 2px}
+.log-x:hover{color:var(--ink)}
+.log ul{list-style:none;display:flex;flex-direction:column}
+.log li{display:flex;gap:12px;font-size:12.5px;color:var(--muted);line-height:1.5;padding:9px 0;border-top:1px solid var(--line)}
+.log li:first-child{border-top:0;padding-top:2px}
 .log .ld{flex:0 0 auto;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
 .log .lt{flex:1}
 </style></head><body>
@@ -307,9 +312,12 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
     <div class="msg" id="msg" aria-live="polite"></div>
   </section>
 
-  <footer class="foot">
-    <button type="button" class="upd" id="updBtn" aria-expanded="false">update : ${updLatest} <span class="cev">&#9662;</span></button>
-    <div class="log" id="updLog"><ul>${updRows}</ul></div>
+  <footer class="foot" id="updFoot">
+    <button type="button" class="upd" id="updBtn" aria-expanded="false" aria-controls="updLog">update : ${updLatest} <span class="cev">&#9662;</span></button>
+    <div class="log" id="updLog" role="dialog" aria-label="업데이트 내역">
+      <div class="log-h"><span>업데이트 내역</span><button type="button" class="log-x" id="updClose" aria-label="닫기">&times;</button></div>
+      <ul>${updRows}</ul>
+    </div>
   </footer>
 </div>
 <script>
@@ -334,8 +342,14 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
   }
   btn.addEventListener("click",submit);
   inp.addEventListener("keydown",function(e){if(e.key==="Enter")submit();});
-  var ub=document.getElementById("updBtn"),lg=document.getElementById("updLog");
-  if(ub&&lg){ub.addEventListener("click",function(){var o=lg.classList.toggle("open");ub.classList.toggle("open",o);ub.setAttribute("aria-expanded",o?"true":"false");});}
+  var ub=document.getElementById("updBtn"),lg=document.getElementById("updLog"),ft=document.getElementById("updFoot"),xb=document.getElementById("updClose");
+  function updOpen(o){lg.classList.toggle("open",o);ub.classList.toggle("open",o);ub.setAttribute("aria-expanded",o?"true":"false");}
+  if(ub&&lg){
+    ub.addEventListener("click",function(e){e.stopPropagation();updOpen(!lg.classList.contains("open"));});
+    if(xb)xb.addEventListener("click",function(){updOpen(false);ub.focus();});
+    document.addEventListener("keydown",function(e){if(e.key==="Escape"&&lg.classList.contains("open")){updOpen(false);ub.focus();}});
+    document.addEventListener("click",function(e){if(lg.classList.contains("open")&&ft&&!ft.contains(e.target))updOpen(false);});
+  }
 })();
 </script>
 </body></html>`;
