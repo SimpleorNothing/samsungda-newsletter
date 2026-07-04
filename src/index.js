@@ -9,12 +9,16 @@
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
+// 인사이트: [누적신호] R2 signals/history.json 일별 스냅샷 축적 → 주간 델타·연속 스트릭·수요 분화(ITB↔XLY) 임계 감지. preview는 읽기전용, 실발송/cron만 기록.
+//           [CI라우팅] MI뉴스 → LG 전략축(A1~A6) 키워드 매칭 → LG 관련건 축 뱃지 + signals/ci-candidates.json 스테이징(사람 검토용, evidence.json 자동커밋 없음).
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
 const FBX_KEY = "signals/fbx.json";  // FBX(Freightos Baltic Index) 일간 운임지수 — R2 수동/외부 갱신
+const SIG_KEY = "signals/history.json";        // 일별 지표 스냅샷 누적(최대 90일) — 누적 신호 감지용
+const CI_CAND_KEY = "signals/ci-candidates.json"; // LG 전략축 관련 뉴스 스테이징(CI 센싱 inbox 후보, 사람 검토)
 const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
 const GRADE_W = { "긴급": 3, "주요": 2, "주시": 1, "참고": 0 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -42,6 +46,129 @@ const T = {
   muted: "#5C6B79", border: "#D3D9D6", brand: "#46647E",
   up: "#B02E24", down: "#46647E",
 };
+
+// LG 전략축 카탈로그 — competitor_intelligence strategies.json (lg-a1~a6) 동기화. 뉴스→축 라우팅 키워드.
+const CI_AXES = [
+  { code: "A1", id: "lg-a1", title: "구독/서비스 수익모델 확장", kw: ["구독", "렌탈", "케어", "멤버십", "구독료", "가전구독", "서비스매출", "d2x"] },
+  { code: "A2", id: "lg-a2", title: "HVAC·AIDC 확장", kw: ["공조", "hvac", "칠러", "히트펌프", "냉난방", "시스템에어컨", "데이터센터", "aidc", "냉각", "에어컨", "공조기", "공조사업"] },
+  { code: "A3", id: "lg-a3", title: "AI홈 플랫폼", kw: ["ai홈", "씽큐", "thinq", "스마트홈", "생성형", "ai가전", "온디바이스", "홈허브", "ai에이전트", "ai 홈"] },
+  { code: "A4", id: "lg-a4", title: "볼륨존·원가구조 재편", kw: ["볼륨존", "보급형", "원가구조", "저가", "가격경쟁", "희망퇴직", "고정비", "중국계", "생산지 최적화"] },
+  { code: "A5", id: "lg-a5", title: "지역 포트폴리오 재편", kw: ["인도", "관세", "글로벌사우스", "글로벌 사우스", "역내생산", "현지생산", "멕시코", "베트남", "동남아", "신흥시장", "ipo", "리쇼어링"] },
+  { code: "A6", id: "lg-a6", title: "로봇 사업 본격화", kw: ["로봇", "휴머노이드", "액추에이터", "로보틱스", "협동로봇", "로보스타", "로보티즈", "베어로보틱스", "글로이드"] },
+];
+// 뉴스 항목 → 매칭된 축 배열(점수 내림차순). headline·summary·tags·products 표면 검색.
+function matchAxes(item) {
+  const hay = [item.headline, item.summary, (item.tags || []).join(" "), (item.products || []).join(" ")].join(" ").toLowerCase();
+  const out = [];
+  for (const ax of CI_AXES) {
+    let hits = 0;
+    for (const k of ax.kw) if (hay.includes(k)) hits++;
+    if (hits) out.push({ code: ax.code, id: ax.id, title: ax.title, score: hits });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+// LG전자 관련 + 축 매칭된 뉴스만 CI 센싱 후보로 추림(중복 제거, 최대 10). evidence.json 자동커밋 아님 — 사람 검토용 스테이징.
+function buildCiCandidates(pool) {
+  const seen = new Set(), out = [];
+  for (const it of (pool || [])) {
+    if (!(it.competitors || []).includes("LG전자")) continue;
+    const ax = matchAxes(it);
+    if (!ax.length || seen.has(it.id)) continue;
+    seen.add(it.id);
+    out.push({
+      id: it.id, headline: it.headline, url: it.url, grade: it.grade,
+      summary: it.summary, publishedAt: it.publishedAt,
+      axes: ax.slice(0, 2).map(a => ({ code: a.code, id: a.id, title: a.title })),
+    });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+async function persistCiCandidates(env, data) {
+  if (!env.RESEARCH) return;
+  try {
+    await env.RESEARCH.put(CI_CAND_KEY,
+      JSON.stringify({ date: data.date, generatedAt: Date.now(), items: data.ciCand || [] }),
+      { httpMetadata: { contentType: "application/json" } });
+  } catch { /* 무시 */ }
+}
+
+// ---------- 누적 신호(시계열 축적 + 임계 감지) ----------
+// 오늘 핵심 지표를 한 줄 스냅샷으로 환원.
+function snapshotSignals(data) {
+  const q = data.q, s = data.freight;
+  const g = k => q[k] ? q[k].price : null;
+  return {
+    date: data.date,
+    krw: g("KRW=X"), mxn: g("MXN=X"), thb: g("THB=X"), vnd: g("VND=X"), inr: g("INR=X"), pln: g("PLN=X"),
+    wti: g("CL=F"), copper: g("HG=F"), tnx: g("^TNX"), itb: g("ITB"), xly: g("XLY"),
+    fbx: s && s.value != null ? s.value : null,
+  };
+}
+async function loadSignalHistory(env) {
+  if (!env.RESEARCH) return [];
+  try { const o = await env.RESEARCH.get(SIG_KEY); if (o) { const a = await o.json(); return Array.isArray(a) ? a : []; } } catch { /* 무시 */ }
+  return [];
+}
+async function persistSignals(env, data) {
+  if (!env.RESEARCH) return;
+  try {
+    let hist = await loadSignalHistory(env);
+    const snap = snapshotSignals(data);
+    hist = hist.filter(x => x.date !== snap.date);  // 같은 날 재실행 upsert
+    hist.push(snap);
+    hist.sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (hist.length > 90) hist = hist.slice(hist.length - 90);
+    await env.RESEARCH.put(SIG_KEY, JSON.stringify(hist), { httpMetadata: { contentType: "application/json" } });
+  } catch { /* 무시 */ }
+}
+// 축적분 대비 주간 누적 델타 + 연속 스트릭 → 임계 돌파 신호. 데이터 얕으면 조용히 비활성.
+function analyzeSignals(history, data) {
+  const breaches = [];
+  const past = (history || []).filter(x => x.date < data.date);
+  if (past.length < 3) return { breaches, ready: false };
+  const snap = snapshotSignals(data);
+  const ref = past.length >= 5 ? past[past.length - 5] : past[0];   // ≈1주 전(저장 5영업일)
+  const cum = k => (snap[k] != null && ref[k] != null && ref[k]) ? (snap[k] - ref[k]) / ref[k] * 100 : null;
+  const bpd = k => (snap[k] != null && ref[k] != null) ? (snap[k] - ref[k]) * 100 : null;
+  const streak = k => {
+    const seq = [...past.slice(-6).map(x => x[k]), snap[k]].filter(v => v != null);
+    if (seq.length < 3) return 0;
+    let dir = 0, run = 0;
+    for (let i = seq.length - 1; i > 0; i--) {
+      const d = Math.sign(seq[i] - seq[i - 1]);
+      if (d === 0) break;
+      if (dir === 0) { dir = d; run = 1; } else if (d === dir) run++; else break;
+    }
+    return dir * run;
+  };
+  const sp = v => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  // 환율(생산거점 통화 강세 = 원가 상승, 원화 강세 = 원가 하락)
+  const fx = [["krw", "원/달러"], ["mxn", "페소"], ["thb", "바트"], ["vnd", "동"], ["inr", "루피"], ["pln", "즈워티"]];
+  for (const [k, nm] of fx) {
+    const c = cum(k), st = streak(k);
+    if (c != null && Math.abs(c) >= 1.5) {
+      const detail = k === "krw"
+        ? (c < 0 ? "원화 강세 — 달러 결제 부품·원자재 원화환산 원가 하락 요인" : "원화 약세 — 수입 부품 원가 상승 요인")
+        : (c >= 0 ? "현지통화 약세 — 현지 조달·인건비 달러환산 하락 요인" : "현지통화 강세 — 현지 원가 상승 요인");
+      breaches.push({ label: `${nm} 주간 ${sp(c)}`, detail, dir: Math.sign(c) });
+    } else if (Math.abs(st) >= 4) {
+      breaches.push({ label: `${nm} ${Math.abs(st)}일 연속 ${st > 0 ? "상승" : "하락"}`, detail: "방향성 지속 — 추세 형성 구간", dir: Math.sign(st) });
+    }
+  }
+  const cWti = cum("wti");
+  if (cWti != null && Math.abs(cWti) >= 3) breaches.push({ label: `WTI 주간 ${sp(cWti)}`, detail: cWti >= 0 ? "유가 상승 — 물류·수지원가 압력" : "유가 하락 — 원가 완화 요인", dir: Math.sign(cWti) });
+  const cCu = cum("copper");
+  if (cCu != null && Math.abs(cCu) >= 3) breaches.push({ label: `구리 주간 ${sp(cCu)}`, detail: cCu >= 0 ? "원자재 상승 — 모터·배선 원가 압력" : "원자재 하락 — 원가 완화 요인", dir: Math.sign(cCu) });
+  const bTnx = bpd("tnx");
+  if (bTnx != null && Math.abs(bTnx) >= 15) breaches.push({ label: `美10Y 주간 ${bTnx >= 0 ? "+" : ""}${Math.round(bTnx)}bp`, detail: bTnx >= 0 ? "금리 상승 — 교체·주택 수요 위축 신호" : "금리 하락 — 수요 여건 개선 신호", dir: Math.sign(bTnx) });
+  const cItb = cum("itb"), cXly = cum("xly");
+  if (cItb != null && Math.abs(cItb) >= 3) breaches.push({ label: `홈빌더ETF 주간 ${sp(cItb)}`, detail: cItb >= 0 ? "주택·빌트인 수요 기대 개선 신호" : "주택·빌트인 수요 기대 위축 신호", dir: Math.sign(cItb) });
+  // 다이버전스: 주택 vs 일반소비 방향 갈림
+  if (cItb != null && cXly != null && Math.sign(cItb) !== Math.sign(cXly) && Math.abs(cItb) >= 2 && Math.abs(cXly) >= 2)
+    breaches.push({ label: "수요 분화", detail: `홈빌더 ${sp(cItb)} vs 소비재 ${sp(cXly)} — 주택·빌트인과 일반소비 방향 갈림`, dir: Math.sign(cItb) });
+  return { breaches: breaches.slice(0, 6), ready: true, refDate: ref.date };
+}
 
 export default {
   async scheduled(event, env, ctx) {
@@ -154,6 +281,9 @@ async function run(env, { send }) {
     await env.RESEARCH.put(`${NL_PREFIX}${data.date}.html`, arc, meta);
     await env.RESEARCH.put(`${NL_PREFIX}latest.html`, arc, meta);
   } catch { /* 아카이브 실패 무시 */ }
+  // 누적 신호 스냅샷 + CI 센싱 후보 기록(실발송·cron 경로에서만 — preview는 오염 방지 위해 미기록)
+  await persistSignals(env, data);
+  await persistCiCandidates(env, data);
 
   if (!send) return { ok: true, sent: false };
   if (!env.RESEND_API_KEY) return { ok: false, error: "RESEND_API_KEY 미설정" };
@@ -180,16 +310,20 @@ async function run(env, { send }) {
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
   const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
-  const [yq, macro, freight, news, ideas, reports] = await Promise.all([
+  const [yq, macro, freight, newsPool, ideas, reports, sigHist] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
     getMacro(),
     getFreight(env),
     getNews(),
     getIdeas(env),
     getReports(env),
+    loadSignalHistory(env),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
+  const news = (newsPool || []).slice(0, 5);
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
+  data.signals = analyzeSignals(sigHist, data);
+  data.ciCand = buildCiCandidates(newsPool);
   data.summary = await aiSummary(env, data);
   return data;
 }
@@ -253,7 +387,7 @@ async function getNews() {
     const cut = Date.now() - DAY;
     const recent = items.filter(i => new Date(i.publishedAt).getTime() >= cut);
     const pool = recent.length ? recent : items;
-    return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)).slice(0, 5);
+    return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 slice)
   } catch { return []; }
 }
 async function getIdeas(env) {
@@ -314,7 +448,12 @@ function summaryContext(data) {
     const meta = [n.grade, n.lens, (n.products || []).join("/"), (n.competitors || []).join("/")].filter(Boolean).join("·");
     return `${i}. 「${n.headline}」 (${meta})\n   요약: ${n.summary || "-"}`;
   }).join("\n");
-  return `[오늘 지표]\n- ${L.join("\n- ")}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
+  const sig = (data.signals && data.signals.ready) ? data.signals.breaches : [];
+  const sigTxt = sig.length ? sig.map(b => `- ${b.label}: ${b.detail}`).join("\n") : "없음 (누적 데이터 축적 중이거나 임계 미돌파)";
+  const ciTxt = (data.ciCand || []).length
+    ? data.ciCand.map(c => `- [${c.axes.map(a => a.code).join("/")}] 「${c.headline}」`).join("\n")
+    : "없음";
+  return `[오늘 지표]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[LG 전략축(A1~A6) 관련 뉴스]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
 }
 function ruleSummary(data) {
   const q = data.q, seg = [];
@@ -365,6 +504,8 @@ async function aiSummary(env, data) {
             "- 추론 규율: 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열.",
             "  · 지표에 직접 없는 수요·판매·점유율은 단정하지 말 것. 거시지표에서 유추한 판단은 근거 지표를 반드시 괄호 병기.",
             "  · '지속'·'추세'·'회복' 같은 시계열 표현은 제공된 전일/전월/전년 델타로 뒷받침될 때만 사용. 스냅샷 하나로 추세를 단정하지 않는다.",
+            "- [누적 신호(주간 축적 대비)]가 제공되면 hero에서 우선 활용한다 — 오늘 스냅샷이 아니라 '무엇이 며칠에 걸쳐 방향을 틀었는지'가 인사이트의 핵심. 이 블록의 방향·해석을 넘어서는 추가 단정은 하지 않는다.",
+            "- [LG 전략축 관련 뉴스]가 제공되면 hero 또는 해당 뉴스의 content/threat에서 어느 전략축(예: A2 HVAC·AIDC)에 닿는 신호인지 한 번 짚어준다. 다만 제공된 헤드라인·요약 범위 안에서만 서술하고 축 진행 상황을 창작하지 않는다.",
           ].join("\n"),
           messages: [{ role: "user", content: summaryContext(data) }],
         }),
@@ -411,6 +552,14 @@ export function renderEmail(data, opts = {}) {
   const sm0 = (data.summary && typeof data.summary === "object") ? data.summary : { hero: String(data.summary || "") };
   const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
   const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
+
+  // 누적 신호 스트립(임계 돌파분만 — 없으면 미표시)
+  const sigBreaches = (data.signals && data.signals.ready) ? (data.signals.breaches || []) : [];
+  const sigStrip = sigBreaches.length ? `<tr><td style="padding:16px 22px 0">
+      <div style="background:${T.surface};border:1px solid ${T.border};border-left:3px solid ${T.up};padding:13px 16px">
+        <div style="font-size:10px;font-weight:800;color:${T.up};letter-spacing:.12em">누적 신호 · 주간 임계 돌파</div>
+        ${sigBreaches.map(b => `<div style="margin-top:7px;font-size:13px;color:${T.text};line-height:1.5"><b style="color:${b.dir >= 0 ? T.up : T.down}">${esc(b.label)}</b> <span style="color:${T.muted}">${esc(b.detail)}</span></div>`).join("")}
+      </div></td></tr>` : "";
 
   // 원가 (전부 MoM)
   const fxParts = [
@@ -469,10 +618,15 @@ export function renderEmail(data, opts = {}) {
     return row("내용", o.content, T.text) + row("기회", o.opportunity, T.brand) + row("위협", o.threat, T.up);
   };
   const newsRows = data.news.length
-    ? data.news.map((i, ni) => `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-        <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>
+    ? data.news.map((i, ni) => {
+        const axBadges = (i.competitors || []).includes("LG전자")
+          ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
+          : "";
+        return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
+        <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`).join("")
+        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`;
+      }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
     ? data.ideas.map(i => {
@@ -510,6 +664,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
         <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
     </td></tr>
+    ${sigStrip}
     ${section("소비", consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
     ${section("원가", cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
     ${section("가전 주요뉴스", newsRows)}
