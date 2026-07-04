@@ -304,7 +304,6 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 
   <section class="subscribe">
     <h2 class="sec">구독 신청</h2>
-    <p class="lead">매일 발행되는 브리핑을 메일로 받아봅니다. 사내 메일 주소로 신청해 주세요.</p>
     <div class="form">
       <input id="email" type="email" inputmode="email" placeholder="name@samsung.com" autocomplete="email">
       <button id="sub" type="button">구독</button>
