@@ -1,7 +1,7 @@
 // samsungda-newsletter — 기획 데일리 (Cloudflare Worker + Cron)
 //
 // 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재·운임(전월)
-//         [소비] 금리 美10Y(전일)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
+//         [소비] 금리 美10Y(전일)·수요 홈빌더ITB/소비재XLY(전일)·주간 실업수당청구/30Y모기지(전주)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
 //         [경쟁사] 가전(WHR·LG·Midea·Haier)·HVAC(Carrier·Trane·Daikin) 전일 대비
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
@@ -39,6 +39,11 @@ const COMP_HVAC = [
 const FRED = {
   cpiUS: "CPIAUCSL", pce: "PCEPI", cpiKR: "KORCPIALLMINMEI",
   houst: "HOUST", exhome: "EXHOSLUSM495S", umich: "UMCSENT", ironore: "PIORECRUSDM",
+};
+// FRED 주간 시리즈 (전주 대비 델타로 매일-근접 신선분 확보)
+const FRED_WEEKLY = {
+  icsa: "ICSA",            // 신규 실업수당청구 (목 릴리스) — 소비여력 선행
+  mortgage30: "MORTGAGE30US", // 30Y 고정 모기지 금리 (목 릴리스) — 주택 매수여력
 };
 
 // CI 팔레트 (competitor_intelligence 상속)
@@ -184,7 +189,7 @@ async function run(env, { send }) {
 
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
-  const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX"];
+  const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
   const compAll = [...COMP_APPLIANCE, ...COMP_HVAC];
   const [yq, comp, macro, scfi, news, ideas, reports] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
@@ -240,9 +245,13 @@ function fredStat(rows) {
   };
 }
 async function getMacro() {
-  const ids = Object.values(FRED);
-  const rows = await Promise.all(ids.map(id => fred(id)));
-  const s = {}; Object.keys(FRED).forEach((k, i) => s[k] = fredStat(rows[i]));
+  const mIds = Object.values(FRED), wIds = Object.values(FRED_WEEKLY);
+  const [mRows, wRows] = await Promise.all([
+    Promise.all(mIds.map(id => fred(id))),
+    Promise.all(wIds.map(id => fred(id, 3))),  // 주간: 최근 3개월이면 전주 델타 확보
+  ]);
+  const s = {}; Object.keys(FRED).forEach((k, i) => s[k] = fredStat(mRows[i]));
+  Object.keys(FRED_WEEKLY).forEach((k, i) => s[k] = fredStat(wRows[i]));  // mom = 전주比
   return s;
 }
 async function getScfi(env) {
@@ -306,7 +315,11 @@ function summaryContext(data) {
   if (q["HG=F"]) L.push(`구리 ${q["HG=F"].price.toFixed(2)} (전월 ${sPct(pctOf(q["HG=F"].price, q["HG=F"].prevMonth))})`);
   if (m.ironore) L.push(`철광석 전월 ${sPct(m.ironore.mom)}`);
   if (s && s.value != null) L.push(`SCFI ${s.value}`);
-  if (q["^TNX"]) L.push(`美10Y ${q["^TNX"].price.toFixed(2)}%`);
+  if (q["^TNX"]) L.push(`美10Y ${q["^TNX"].price.toFixed(2)}% (전일 ${sPct(pctOf(q["^TNX"].price, q["^TNX"].prevDay))})`);
+  if (q["ITB"]) L.push(`홈빌더ETF(ITB) ${q["ITB"].price.toFixed(2)} (전일 ${sPct(pctOf(q["ITB"].price, q["ITB"].prevDay))})`);
+  if (q["XLY"]) L.push(`소비재ETF(XLY) ${q["XLY"].price.toFixed(2)} (전일 ${sPct(pctOf(q["XLY"].price, q["XLY"].prevDay))})`);
+  if (m.icsa) L.push(`美신규실업수당청구 ${Math.round(m.icsa.val / 1000)}K (전주 ${sPct(m.icsa.mom)})`);
+  if (m.mortgage30) L.push(`美30Y모기지 ${m.mortgage30.val.toFixed(2)}% (전주 ${sPct(m.mortgage30.mom)})`);
   if (m.cpiUS) L.push(`美CPI 전년 ${sPct(m.cpiUS.yoy)}`);
   if (m.cpiKR) L.push(`韓CPI 전년 ${sPct(m.cpiKR.yoy)}`);
   if (m.umich) L.push(`美소비심리 ${m.umich.val.toFixed(1)}`);
@@ -324,6 +337,7 @@ function ruleSummary(data) {
   if (q["KRW=X"]) add("원/달러", pctOf(q["KRW=X"].price, q["KRW=X"].prevDay));
   if (q["CL=F"]) add("WTI", pctOf(q["CL=F"].price, q["CL=F"].prevDay));
   if (q["HG=F"]) add("구리", pctOf(q["HG=F"].price, q["HG=F"].prevMonth));
+  if (q["ITB"]) add("홈빌더ETF", pctOf(q["ITB"].price, q["ITB"].prevDay));
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 원가·소비 지표 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
@@ -348,7 +362,9 @@ async function aiSummary(env, data) {
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
             '{"hero":"...","consume":"...","cost":"...","comp":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
             "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
-            "- consume: 소비 환경(금리·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
+            "- consume: 소비 환경(금리·수요ETF·주간지표·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
+            "  · 물가·주택·심리가 월간이라 당일 신선한 델타가 없으면, 일간 프록시(10Y 전일·홈빌더ETF ITB 전일·소비재ETF XLY 전일)나 주간 지표(신규 실업수당청구·30Y 모기지 전주)를 근거로 소비 방향을 서술한다. 매일 최소 하나의 신선 신호를 담는다.",
+            "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
             "- cost: 원가 환경(환율·유가·원자재·운임)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내.",
             "- comp: 경쟁사 주가 움직임의 해석 한 문장(명사형 마무리) + 괄호로 근거(종목·변동률) 병기. 전체 75자 이내. 유의미한 변동이 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
@@ -438,8 +454,21 @@ export function renderEmail(data, opts = {}) {
   // 소비
   const bp = q["^TNX"] && q["^TNX"].prevDay != null ? Math.round((q["^TNX"].price - q["^TNX"].prevDay) * 100) : null;
   const yoyTxt = st => st && st.yoy != null ? `<b>${st.yoy >= 0 ? "+" : ""}${st.yoy.toFixed(1)}%</b> <span style="color:${T.muted};font-size:12px">(${st.date})</span>` : "<b>—</b>";
+  // 주간 지표: fredStat.mom = 전주比. 릴리스일(목) 외에도 최신 발표치를 항상 표기.
+  const wkTxt = (st, unit, dg = 0) => st && st.val != null
+    ? `<b>${fmt(st.val, dg)}${unit}</b>${st.mom != null ? arrow(st.mom) : ""} <span style="color:${T.muted};font-size:12px">(${st.date})</span>`
+    : "<b>—</b>";
+  const demandParts = [
+    q["ITB"] ? `홈빌더(ITB) <b>$${fmt(q["ITB"].price)}</b>${dchg(q["ITB"])}` : null,
+    q["XLY"] ? `소비재(XLY) <b>$${fmt(q["XLY"].price)}</b>${dchg(q["XLY"])}` : null,
+  ].filter(Boolean).join(dot);
   const consume = [
     q["^TNX"] ? line(`${lbl("금리")} 美 10Y <b>${fmt(q["^TNX"].price)}%</b>${bp != null ? ` <span style="color:${bp >= 0 ? T.up : T.down};font-weight:600">${bp >= 0 ? "▲" : "▼"}${Math.abs(bp)}bp</span>` : ""}`) : "",
+    demandParts ? line(`${lbl("수요")} ${demandParts}`) : "",
+    (m.icsa || m.mortgage30) ? line(`${lbl("주간")} ${[
+      m.icsa ? `실업수당청구 ${m.icsa.val != null ? `<b>${fmt(m.icsa.val / 1000, 0)}K</b>${m.icsa.mom != null ? arrow(m.icsa.mom) : ""} <span style="color:${T.muted};font-size:12px">(${m.icsa.date})</span>` : "<b>—</b>"}` : null,
+      m.mortgage30 ? `30Y 모기지 ${wkTxt(m.mortgage30, "%", 2)}` : null,
+    ].filter(Boolean).join(dot)}`) : "",
     line(`${lbl("물가")} 美 CPI ${yoyTxt(m.cpiUS)}${dot}PCE ${yoyTxt(m.pce)}${dot}韓 CPI ${yoyTxt(m.cpiKR)}`),
     m.houst || m.exhome ? line(`${lbl("주택")} ${[
       m.houst ? `착공 <b>${fmt(m.houst.val, 0)}K</b>${arrow(m.houst.mom)}` : null,
@@ -504,7 +533,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
         <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
     </td></tr>
-    ${section("소비", consume, "금리 전일 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
+    ${section("소비", consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
     ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월", false, sm.sec.cost)}
     ${section("경쟁사 주가", comp, "전일 대비", false, sm.sec.comp)}
     ${section("가전 주요뉴스", newsRows)}
@@ -515,7 +544,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
-    지표 출처: Yahoo Finance(환율·유가·구리·금리·주가), FRED(CPI·PCE·주택·소비심리·철광석). 비교시점: 원가 환율·유가·경쟁사 전일, 원가 원자재·운임 전월, 소비 금리 전일·물가 전년·주택·심리 전월. 월간지표는 최신 발표월 기준.
+    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더/소비재ETF·주가), FRED(실업수당청구·모기지·CPI·PCE·주택·소비심리·철광석). 비교시점: 환율·유가·수요ETF·경쟁사 전일, 주간지표 전주, 원자재·운임 전월, 물가 전년, 주택·심리 전월. 주간/월간지표는 최신 발표치 기준.
   </div>
 </td></tr>
 </table>
