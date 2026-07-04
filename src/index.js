@@ -2,7 +2,7 @@
 //
 // 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재·운임(전월)
 //         [소비] 금리 美10Y(전일)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
-//         [경쟁사] 가전(WHR·LG·Midea·Haier·SharkNinja)·HVAC(Carrier·Trane·Daikin) 전일 대비
+//         [경쟁사] 가전(WHR·LG·Midea·Haier)·HVAC(Carrier·Trane·Daikin) 전일 대비
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
@@ -30,7 +30,6 @@ const CORS = {
 const COMP_APPLIANCE = [
   { n: "Whirlpool", s: "WHR" }, { n: "LG전자", s: "066570.KS" },
   { n: "Midea", s: "000333.SZ" }, { n: "Haier", s: "600690.SS" },
-  { n: "SharkNinja", s: "SN" },
 ];
 const COMP_HVAC = [
   { n: "Carrier", s: "CARR" }, { n: "Trane", s: "TT" }, { n: "Daikin", s: "6367.T" },
@@ -486,8 +485,8 @@ export function renderEmail(data, opts = {}) {
       <div style="margin-top:8px">${body}</div></td></tr>`;
 
   return `<!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:${T.bg};font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"></head>
+<body style="margin:0;padding:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
 ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.text};color:${T.bg};font-size:11px;font-weight:700;letter-spacing:.14em;padding:4px 10px">SAMPLE</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
@@ -526,8 +525,8 @@ function unsubPage(ok, email) {
     ? `<b>${email.replace(/[&<>"]/g, "")}</b> 님의 뉴스레터 수신이 해지되었습니다.`
     : `유효하지 않은 링크입니다. 이미 해지되었거나 링크가 만료되었을 수 있습니다.`;
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>수신거부</title></head>
-<body style="margin:0;background:${T.bg};font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:${T.text}">
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"><title>수신거부</title></head>
+<body style="margin:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif;color:${T.text}">
 <div style="max-width:420px;margin:80px auto;padding:32px 28px;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};text-align:center">
   <div style="font-size:17px;font-weight:800;margin-bottom:10px">기획 데일리</div>
   <div style="font-size:14px;color:${T.muted};line-height:1.7">${msg}</div>
