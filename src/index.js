@@ -4,7 +4,7 @@
 //         [소비] 금리 美10Y(전일)·수요 홈빌더ITB/소비재XLY(전일)·주간 실업수당청구/30Y모기지(전주)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
-// 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
+// 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED CSV(무키 월간지표)·R2 samsungda-research.
 // 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
@@ -489,10 +489,17 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 </body></html>`;
 }
 
-// Yahoo 차트: 최근 3개월 일봉 → 최신·전일·1개월전(≈21거래일)
+// 시리즈 다운샘플: 스파크라인 URL 압축용(균등 간격 n개 추출)
+function downsample(arr, n) {
+  if (arr.length <= n) return arr.slice();
+  const out = [], step = (arr.length - 1) / (n - 1);
+  for (let i = 0; i < n; i++) out.push(arr[Math.round(i * step)]);
+  return out;
+}
+// Yahoo 차트: 최근 6개월 일봉 → 최신·전일·1개월전(≈21거래일)·6M시점·스파크라인 시리즈
 async function yahoo(sym) {
   try {
-    const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=3mo`;
+    const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=6mo`;
     const r = (await (await fetch(u, UA)).json()).chart.result[0];
     const closes = (r.indicators.quote[0].close || []).filter(x => x != null);
     if (!closes.length) return null;
@@ -500,6 +507,8 @@ async function yahoo(sym) {
       price: closes[closes.length - 1],
       prevDay: closes.length >= 2 ? closes[closes.length - 2] : null,
       prevMonth: closes[Math.max(0, closes.length - 22)],
+      first6m: closes[0],
+      spark: downsample(closes, 26).map(v => Number(v.toPrecision(4))),
     };
   } catch { return null; }
 }
@@ -711,6 +720,41 @@ export function renderEmail(data, opts = {}) {
   const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
   const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
 
+  // 추이 스트립: 6개월 일봉 시리즈 → QuickChart 라인 PNG(이메일 안전). 이미지 차단 대비 vs 6M 델타 텍스트 병기.
+  const sparkUrl = (series, color) => {
+    if (!series || series.length < 4) return "";
+    const c = { type: "sparkline", data: { datasets: [{ data: series, borderColor: color, borderWidth: 2, pointRadius: 0, fill: false, lineTension: 0.25 }] } };
+    return "https://quickchart.io/chart?bkg=transparent&w=132&h=36&c=" + encodeURIComponent(JSON.stringify(c));
+  };
+  const trendCell = (label, valHtml, qi) => {
+    if (!qi) return `<td width="33%" style="padding:10px 8px;vertical-align:top"></td>`;
+    const net = (qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
+    const col = net == null ? T.muted : (net >= 0 ? T.up : T.down);
+    const url = sparkUrl(qi.spark, col);
+    const img = url ? `<img src="${url}" width="132" height="36" alt="" style="display:block;width:100%;max-width:150px;height:36px;margin:6px 0 4px">` : `<div style="height:36px;margin:6px 0 4px"></div>`;
+    const delta = net == null ? "" : `<span style="color:${col};font-weight:700">${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%</span>`;
+    return `<td width="33%" style="padding:10px 8px;vertical-align:top">
+        <div style="font-size:11px;color:${T.muted};font-weight:600">${label}</div>${img}
+        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
+        <div style="font-size:11px;margin-top:2px">${delta} <span style="color:${T.muted}">6M</span></div>
+      </td>`;
+  };
+  const trendStrip = cells => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;border-top:1px solid ${T.border}">
+      <tr><td colspan="3" style="padding:9px 8px 0;font-size:10px;font-weight:800;color:${T.muted};letter-spacing:.1em">6개월 추이</td></tr>
+      <tr>${cells}</tr></table>`;
+  const uPct = `<span style="font-size:11px;color:${T.muted}">%</span>`;
+  const uLb = `<span style="font-size:11px;color:${T.muted}">/lb</span>`;
+  const consumeTrend = trendStrip([
+    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"]),
+    trendCell("홈빌더 ITB", `$${fmt(q["ITB"] ? q["ITB"].price : null)}`, q["ITB"]),
+    trendCell("소비재 XLY", `$${fmt(q["XLY"] ? q["XLY"].price : null)}`, q["XLY"]),
+  ].join(""));
+  const costTrend = trendStrip([
+    trendCell("원/달러", fmt(q["KRW=X"] ? q["KRW=X"].price : null, 1), q["KRW=X"]),
+    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"]),
+    trendCell("구리", `$${fmt(q["HG=F"] ? q["HG=F"].price : null)}${uLb}`, q["HG=F"]),
+  ].join(""));
+
   // 누적 신호 스트립(임계 돌파분만 — 없으면 미표시)
   const sigBreaches = (data.signals && data.signals.ready) ? (data.signals.breaches || []) : [];
   const sigStrip = sigBreaches.length ? `<tr><td style="padding:16px 22px 0">
@@ -781,11 +825,9 @@ export function renderEmail(data, opts = {}) {
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-        <div style="background:${T.bg};padding:7px 10px">
-          <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
-        </div>
-        <div style="padding:0 10px">${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div></div>`;
+        <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
+        ${newsWhyRows(sm.newsWhy[ni])}
+        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
@@ -793,10 +835,8 @@ export function renderEmail(data, opts = {}) {
         const dir = i.dir === "profit" ? "수익" : "매출";
         const memo = i.memo ? `<div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <div style="background:${T.bg};padding:7px 10px">
-            <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
-            <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>
-          </div>${memo ? `<div style="padding:0 10px">${memo}</div>` : ""}</div>`;
+          <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
+          <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
@@ -827,8 +867,8 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("소비", consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
-    ${section("원가", cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
+    ${section("소비", consumeTrend + consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
+    ${section("원가", costTrend + cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
