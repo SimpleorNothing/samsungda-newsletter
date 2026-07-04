@@ -4,7 +4,7 @@
 //         [소비] 금리 美10Y(전일)·수요 홈빌더ITB/소비재XLY(전일)·주간 실업수당청구/30Y모기지(전주)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
-// 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
+// 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED CSV(무키 월간지표)·R2 samsungda-research.
 // 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
@@ -199,6 +199,20 @@ export default {
       }
       return json({ count: out.length, subscribers: out });
     }
+    if (url.pathname === "/recipients") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      const stat = (env.RECIPIENTS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+      const subs = await getSubscribers(env);
+      const statSet = new Set(stat), subSet = new Set(subs);
+      const all = [...new Set([...stat, ...subs])];
+      const recipients = all.map(email => ({
+        email,
+        source: (statSet.has(email) && subSet.has(email)) ? "both"
+              : statSet.has(email) ? "fixed" : "subscribed",
+      }));
+      return json({ count: recipients.length, fixed: stat.length, subscribed: subs.length, recipients });
+    }
     if (url.pathname === "/" || url.pathname === "/archive") return htmlResp(await archivePage(env));
     if (url.pathname === "/latest") {
       const obj = await env.RESEARCH.get(NL_PREFIX + "latest.html");
@@ -246,61 +260,27 @@ async function handleSubscribe(request, env) {
     await env.RESEARCH.put(await subKey(email), JSON.stringify({ email, createdAt: Date.now() }),
       { httpMetadata: { contentType: "application/json" } });
   } catch (e) { return json({ ok: false, error: "store_failed" }, 500); }
-  // 구독 확인(환영) 메일 발송 — 실패해도 구독 자체는 완료로 처리
-  let welcomed = false;
-  if (env.RESEND_API_KEY) {
-    try {
-      const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
-      const token = await signToken(email, signKey(env));
-      const link = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
-      const r = await sendResend(env, {
-        to: email,
-        subject: "✅ 기획 데일리 뉴스레터 구독이 시작되었습니다",
-        html: welcomeEmail(link, pub),
-      });
-      welcomed = r.ok;
-    } catch { /* 확인 메일 실패는 무시 */ }
-  }
-  return json({ ok: true, email, welcomed });
+  await sendWelcome(env, email);  // 확인 메일 발송(실패해도 구독 성공엔 영향 없음)
+  return json({ ok: true, email });
 }
-// Resend 단건 발송 헬퍼(구독 확인·데일리 공용)
-async function sendResend(env, { to, subject, html }) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [to], subject, html }),
-  });
-  if (res.ok) return { ok: true };
-  const j = await res.json().catch(() => ({}));
-  return { ok: false, error: j.message || res.status };
-}
-// 구독 확인(환영) 메일 — DA 토큰(흰 배경·#1257d6·라운드 카드), 이메일 호환 table+inline CSS
-function welcomeEmail(unsubLink, pub) {
-  const latest = pub ? `${pub}/latest` : "#";
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f6fb;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:24px 12px;">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e6ebf5;border-radius:16px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Malgun Gothic','맑은 고딕',sans-serif;">
-<tr><td style="background:#1257d6;padding:22px 28px;">
-<div style="color:#ffffff;font-size:18px;font-weight:700;">기획 데일리</div>
-<div style="color:#cfe0ff;font-size:13px;margin-top:2px;">가전 기획 도구모음 · 데일리 브리핑</div>
-</td></tr>
-<tr><td style="padding:28px;">
-<div style="font-size:20px;font-weight:700;color:#111827;margin-bottom:10px;">구독이 시작되었습니다 🎉</div>
-<p style="font-size:15px;line-height:1.65;color:#374151;margin:0 0 14px;">뉴스레터 구독 신청이 정상적으로 완료되었습니다. 이제 <b>매일 아침(평일)</b> 시장지표·가전 주요뉴스·아이디어뱅크·보고서를 정리한 브리핑을 이 메일 주소로 받아보실 수 있습니다.</p>
-<p style="font-size:15px;line-height:1.65;color:#374151;margin:0 0 22px;">첫 호는 다음 발행일 아침에 도착합니다. 그동안 지난 뉴스레터를 먼저 살펴보셔도 좋습니다.</p>
-<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:10px;background:#1257d6;">
-<a href="${latest}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">최신 뉴스레터 보기</a>
-</td></tr></table>
-</td></tr>
-<tr><td style="padding:16px 28px 26px;border-top:1px solid #eef2f9;">
-<p style="font-size:12px;line-height:1.6;color:#9ca3af;margin:0;">본 메일은 구독 신청에 따라 발송되었습니다. 더 이상 받고 싶지 않으시면 <a href="${unsubLink}" style="color:#1257d6;text-decoration:underline;">구독 해지</a>를 눌러주세요.</p>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body></html>`;
+// 구독 신청 확인 메일 — Resend 로 즉시 발송. 키/네트워크 실패는 조용히 무시(구독은 이미 저장됨).
+async function sendWelcome(env, email) {
+  if (!env.RESEND_API_KEY) return;
+  const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
+  const token = await signToken(email, signKey(env));
+  const unsub = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>",
+        to: [email],
+        subject: "📊 기획 데일리 · 구독 신청이 완료되었습니다",
+        html: welcomeEmail(pub, unsub),
+      }),
+    });
+  } catch { /* 확인 메일 실패 무시 */ }
 }
 async function handleUnsub(url, env) {
   const email = String(url.searchParams.get("e") || "").trim().toLowerCase();
@@ -352,7 +332,7 @@ async function run(env, { send }) {
   const to = await allRecipients(env);
   if (!to.length) return { ok: false, error: "수신자 없음" };
 
-  const subject = `📊 기획 데일리 · ${data.date}`;
+  const subject = `📊 기획 데일리 · ${data.date} (${kstWeekday(data.date)})`;
   let sent = 0, failed = 0; const errs = [];
   for (const email of to) {
     const token = await signToken(email, signKey(env));
@@ -418,7 +398,7 @@ async function archivePage(env) {
     return '<li><span class="ld">' + u.d + '</span><span class="lt">' + u.t + '</span></li>';
   }).join("");
   const rows = issues.map(function (d) {
-    return '<a class="iss" href="' + pub + '/issue?d=' + encodeURIComponent(d) + '"><span class="d">' + d.replace(/\./g, ". ") + '</span><span class="go">기획 데일리 &rarr;</span></a>';
+    return '<a class="iss" href="' + pub + '/issue?d=' + encodeURIComponent(d) + '"><span class="d">' + d.replace(/\./g, ". ") + ' <span class="dow">(' + kstWeekday(d) + ')</span></span><span class="go">기획 데일리 &rarr;</span></a>';
   }).join("");
   const list = issues.length
     ? '<div class="list">' + rows + '</div>'
@@ -453,6 +433,7 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 .iss{display:flex;align-items:center;justify-content:space-between;gap:12px;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--line);padding:14px 16px;margin-bottom:8px;transition:border-color .15s,box-shadow .15s}
 .iss:hover{border-color:var(--ink);box-shadow:0 2px 0 var(--brand)}
 .iss .d{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.iss .dow{color:var(--muted);font-weight:600}
 .iss .go{font-size:13px;color:var(--muted)}
 .empty{background:var(--surface);border:1px dashed var(--line);padding:26px 20px;text-align:center;font-size:14px;color:var(--muted);line-height:1.9}
 .tools{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;color:var(--muted);text-decoration:none;transition:color .15s}
@@ -488,7 +469,6 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 
   <section class="subscribe">
     <h2 class="sec">구독 신청</h2>
-    <p class="lead">매일 발행되는 브리핑을 메일로 받아봅니다. 사내 메일 주소로 신청해 주세요.</p>
     <div class="form">
       <input id="email" type="email" inputmode="email" placeholder="name@samsung.com" autocomplete="email">
       <button id="sub" type="button">구독</button>
@@ -539,10 +519,17 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 </body></html>`;
 }
 
-// Yahoo 차트: 최근 3개월 일봉 → 최신·전일·1개월전(≈21거래일)
+// 시리즈 다운샘플: 스파크라인 URL 압축용(균등 간격 n개 추출)
+function downsample(arr, n) {
+  if (arr.length <= n) return arr.slice();
+  const out = [], step = (arr.length - 1) / (n - 1);
+  for (let i = 0; i < n; i++) out.push(arr[Math.round(i * step)]);
+  return out;
+}
+// Yahoo 차트: 최근 6개월 일봉 → 최신·전일·1개월전(≈21거래일)·6M시점·스파크라인 시리즈
 async function yahoo(sym) {
   try {
-    const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=3mo`;
+    const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=6mo`;
     const r = (await (await fetch(u, UA)).json()).chart.result[0];
     const closes = (r.indicators.quote[0].close || []).filter(x => x != null);
     if (!closes.length) return null;
@@ -550,6 +537,8 @@ async function yahoo(sym) {
       price: closes[closes.length - 1],
       prevDay: closes.length >= 2 ? closes[closes.length - 2] : null,
       prevMonth: closes[Math.max(0, closes.length - 22)],
+      first6m: closes[0],
+      spark: downsample(closes, 26).map(v => Number(v.toPrecision(4))),
     };
   } catch { return null; }
 }
@@ -761,6 +750,41 @@ export function renderEmail(data, opts = {}) {
   const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
   const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
 
+  // 추이 스트립: 6개월 일봉 시리즈 → QuickChart 라인 PNG(이메일 안전). 이미지 차단 대비 vs 6M 델타 텍스트 병기.
+  const sparkUrl = (series, color) => {
+    if (!series || series.length < 4) return "";
+    const c = { type: "sparkline", data: { datasets: [{ data: series, borderColor: color, borderWidth: 2, pointRadius: 0, fill: false, lineTension: 0.25 }] } };
+    return "https://quickchart.io/chart?bkg=transparent&w=132&h=36&c=" + encodeURIComponent(JSON.stringify(c));
+  };
+  const trendCell = (label, valHtml, qi) => {
+    if (!qi) return `<td width="33%" style="padding:10px 8px;vertical-align:top"></td>`;
+    const net = (qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
+    const col = net == null ? T.muted : (net >= 0 ? T.up : T.down);
+    const url = sparkUrl(qi.spark, col);
+    const img = url ? `<img src="${url}" width="132" height="36" alt="" style="display:block;width:100%;max-width:150px;height:36px;margin:6px 0 4px">` : `<div style="height:36px;margin:6px 0 4px"></div>`;
+    const delta = net == null ? "" : `<span style="color:${col};font-weight:700">${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%</span>`;
+    return `<td width="33%" style="padding:10px 8px;vertical-align:top">
+        <div style="font-size:11px;color:${T.muted};font-weight:600">${label}</div>${img}
+        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
+        <div style="font-size:11px;margin-top:2px">${delta} <span style="color:${T.muted}">6M</span></div>
+      </td>`;
+  };
+  const trendStrip = cells => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;border-top:1px solid ${T.border}">
+      <tr><td colspan="3" style="padding:9px 8px 0;font-size:10px;font-weight:800;color:${T.muted};letter-spacing:.1em">6개월 추이</td></tr>
+      <tr>${cells}</tr></table>`;
+  const uPct = `<span style="font-size:11px;color:${T.muted}">%</span>`;
+  const uLb = `<span style="font-size:11px;color:${T.muted}">/lb</span>`;
+  const consumeTrend = trendStrip([
+    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"]),
+    trendCell("홈빌더 ITB", `$${fmt(q["ITB"] ? q["ITB"].price : null)}`, q["ITB"]),
+    trendCell("소비재 XLY", `$${fmt(q["XLY"] ? q["XLY"].price : null)}`, q["XLY"]),
+  ].join(""));
+  const costTrend = trendStrip([
+    trendCell("원/달러", fmt(q["KRW=X"] ? q["KRW=X"].price : null, 1), q["KRW=X"]),
+    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"]),
+    trendCell("구리", `$${fmt(q["HG=F"] ? q["HG=F"].price : null)}${uLb}`, q["HG=F"]),
+  ].join(""));
+
   // 누적 신호 스트립(임계 돌파분만 — 없으면 미표시)
   const sigBreaches = (data.signals && data.signals.ready) ? (data.signals.breaches || []) : [];
   const sigStrip = sigBreaches.length ? `<tr><td style="padding:16px 22px 0">
@@ -831,11 +855,9 @@ export function renderEmail(data, opts = {}) {
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-        <div style="background:${T.bg};padding:7px 10px">
-          <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
-        </div>
-        <div style="padding:0 10px">${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div></div>`;
+        <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
+        ${newsWhyRows(sm.newsWhy[ni])}
+        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
@@ -843,10 +865,8 @@ export function renderEmail(data, opts = {}) {
         const dir = i.dir === "profit" ? "수익" : "매출";
         const memo = i.memo ? `<div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <div style="background:${T.bg};padding:7px 10px">
-            <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
-            <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>
-          </div>${memo ? `<div style="padding:0 10px">${memo}</div>` : ""}</div>`;
+          <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
+          <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
@@ -867,7 +887,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
-      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} · SAMSUNG DA 기획 도구모음</div>
+      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
       <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 뉴스 · 아이디어 · 보고서</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
@@ -877,8 +897,8 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("소비", consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
-    ${section("원가", cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
+    ${section("소비", consumeTrend + consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
+    ${section("원가", costTrend + cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
@@ -891,6 +911,31 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
   </div>
 </td></tr>
 </table>
+</body></html>`;
+}
+
+// 구독 신청 확인 메일 본문(HTML). pub=공개 URL, unsub=수신거부 링크.
+function welcomeEmail(pub, unsub) {
+  const latest = pub ? `${pub}/latest` : "#";
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"></head>
+<body style="margin:0;padding:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0"><tr><td align="center">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
+    <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
+      <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
+      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">SAMSUNG DA 기획 도구모음</div>
+    </td></tr>
+    <tr><td style="padding:28px 22px 24px">
+      <div style="font-size:16px;font-weight:700;color:${T.text};line-height:1.6">구독 신청이 완료되었습니다.</div>
+      <div style="margin-top:12px;font-size:14px;color:${T.muted};line-height:1.75">이제 매일 아침(월~금) 지표와 뉴스에 의미를 더한 <b style="color:${T.text}">기획 데일리</b> 브리핑을 이 메일 주소로 받아보실 수 있습니다. 다음 발행 호부터 도착합니다.</div>
+      <div style="margin-top:20px"><a href="${latest}" style="display:inline-block;padding:10px 18px;background:${T.brand};color:#fff;font-size:14px;font-weight:700;text-decoration:none">최근 호 보기 →</a></div>
+    </td></tr>
+    <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
+      <div style="font-size:11px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="${unsub}" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+    </td></tr>
+  </table>
+</td></tr></table>
 </body></html>`;
 }
 
@@ -912,4 +957,11 @@ function kstDate(ts = Date.now()) {
   const k = new Date(ts + 9 * 3600 * 1000);
   const p = n => String(n).padStart(2, "0");
   return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())}`;
+}
+// YYYY.MM.DD → 한글 요일(월~일). 발송 제목·아카이브 날짜 옆 표기용.
+const WEEKDAYS_KO = ["일", "월", "화", "수", "목", "금", "토"];
+function kstWeekday(dateStr) {
+  const m = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(dateStr || "");
+  if (!m) return "";
+  return WEEKDAYS_KO[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()];
 }
