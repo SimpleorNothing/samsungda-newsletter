@@ -263,6 +263,17 @@ async function handleSubscribe(request, env) {
   await sendWelcome(env, email);  // 확인 메일 발송(실패해도 구독 성공엔 영향 없음)
   return json({ ok: true, email });
 }
+// Resend 단건 발송 헬퍼(구독 확인·데일리 공용). ok/에러를 반환.
+async function sendResend(env, { to, subject, html }) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [to], subject, html }),
+  });
+  if (res.ok) return { ok: true };
+  const j = await res.json().catch(() => ({}));
+  return { ok: false, error: j.message || res.status };
+}
 // 구독 신청 확인 메일 — Resend 로 즉시 발송. 키/네트워크 실패는 조용히 무시(구독은 이미 저장됨).
 async function sendWelcome(env, email) {
   if (!env.RESEND_API_KEY) return;
@@ -270,15 +281,10 @@ async function sendWelcome(env, email) {
   const token = await signToken(email, signKey(env));
   const unsub = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
   try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>",
-        to: [email],
-        subject: "📊 기획 데일리 · 구독 신청이 완료되었습니다",
-        html: welcomeEmail(pub, unsub),
-      }),
+    await sendResend(env, {
+      to: email,
+      subject: "📊 기획 데일리 · 구독 신청이 완료되었습니다",
+      html: welcomeEmail(pub, unsub),
     });
   } catch { /* 확인 메일 실패 무시 */ }
 }
