@@ -226,6 +226,13 @@ async function listIssues(env) {
 async function archivePage(env) {
   const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
   const issues = await listIssues(env);
+  const UPDATES = [
+    { d: "2026.07.04", t: "페이지 하단 업데이트 이력 표시 추가" },
+  ];
+  const updLatest = UPDATES.length ? UPDATES[0].d : "";
+  const updRows = UPDATES.map(function (u) {
+    return '<li><span class="ld">' + u.d + '</span><span class="lt">' + u.t + '</span></li>';
+  }).join("");
   const rows = issues.map(function (d) {
     return '<a class="iss" href="' + pub + '/issue?d=' + encodeURIComponent(d) + '"><span class="d">' + d.replace(/\./g, ". ") + '</span><span class="go">기획 데일리 &rarr;</span></a>';
   }).join("");
@@ -267,6 +274,17 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 .tools{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;color:var(--muted);text-decoration:none;transition:color .15s}
 .tools:hover{color:var(--ink)}
 .tools svg{width:15px;height:15px;flex:0 0 auto}
+.foot{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start}
+.upd{font:inherit;font-size:12px;color:var(--muted);background:none;border:none;padding:0;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+.upd:hover{color:var(--ink)}
+.upd .cev{font-size:10px;transition:transform .15s}
+.upd.open .cev{transform:rotate(180deg)}
+.log{display:none;width:100%;margin-top:12px}
+.log.open{display:block}
+.log ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+.log li{display:flex;gap:12px;font-size:12.5px;color:var(--muted);line-height:1.55}
+.log .ld{flex:0 0 auto;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.log .lt{flex:1}
 </style></head><body>
 <div class="wrap">
   <header>
@@ -288,6 +306,11 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
     </div>
     <div class="msg" id="msg" aria-live="polite"></div>
   </section>
+
+  <footer class="foot">
+    <button type="button" class="upd" id="updBtn" aria-expanded="false">update : ${updLatest} <span class="cev">&#9662;</span></button>
+    <div class="log" id="updLog"><ul>${updRows}</ul></div>
+  </footer>
 </div>
 <script>
 (function(){
@@ -311,6 +334,8 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
   }
   btn.addEventListener("click",submit);
   inp.addEventListener("keydown",function(e){if(e.key==="Enter")submit();});
+  var ub=document.getElementById("updBtn"),lg=document.getElementById("updLog");
+  if(ub&&lg){ub.addEventListener("click",function(){var o=lg.classList.toggle("open");ub.classList.toggle("open",o);ub.setAttribute("aria-expanded",o?"true":"false");});}
 })();
 </script>
 </body></html>`;
