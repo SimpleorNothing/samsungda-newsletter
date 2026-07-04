@@ -246,7 +246,7 @@ header{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:24px
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--brand);margin-bottom:8px}
 h1{font-size:28px;font-weight:800;letter-spacing:-.5px}
 .sub{font-size:14px;color:var(--muted);margin-top:8px}
-.card{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--brand);padding:22px 20px;margin-bottom:28px}
+.card{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--brand);padding:22px 20px;margin:24px 0 28px}
 .card h2{font-size:15px;font-weight:700;margin-bottom:6px}
 .card .lead{font-size:13px;color:var(--muted);margin-bottom:14px}
 .form{display:flex;gap:8px}
@@ -272,11 +272,14 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
   <header>
     <div class="eyebrow">기획 데일리</div>
     <h1>뉴스레터 모음</h1>
-    <p class="sub">지표와 뉴스에 의미를 더한 데일리 브리핑입니다. 지난 호를 모아보고 메일 구독을 신청할 수 있습니다.</p>
+    <p class="sub">지표와 뉴스에 의미를 더한 데일리 브리핑입니다. 구독하면 매일 아침 메일로 받으실 수 있습니다.</p>
   </header>
 
+  <h2 class="sec">지난 호</h2>
+  ${list}
+
   <div class="card">
-    <h2>메일 구독</h2>
+    <h2>구독 신청</h2>
     <p class="lead">매일 발행되는 브리핑을 메일로 받아봅니다. 사내 메일 주소로 신청해 주세요.</p>
     <div class="form">
       <input id="email" type="email" inputmode="email" placeholder="name@samsung.com" autocomplete="email">
@@ -284,9 +287,6 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
     </div>
     <div class="msg" id="msg" aria-live="polite"></div>
   </div>
-
-  <h2 class="sec">지난 호</h2>
-  ${list}
 
   <a class="back" href="https://samsungda.net">&larr; 기획도구 모음으로</a>
 </div>
