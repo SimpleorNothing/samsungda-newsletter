@@ -298,7 +298,7 @@ async function run(env, { send }) {
   const to = await allRecipients(env);
   if (!to.length) return { ok: false, error: "수신자 없음" };
 
-  const subject = `📊 기획 데일리 · ${data.date}`;
+  const subject = `📊 기획 데일리 · ${data.date} (${kstWeekday(data.date)})`;
   let sent = 0, failed = 0; const errs = [];
   for (const email of to) {
     const token = await signToken(email, signKey(env));
@@ -368,7 +368,7 @@ async function archivePage(env) {
     return '<li><span class="ld">' + u.d + '</span><span class="lt">' + u.t + '</span></li>';
   }).join("");
   const rows = issues.map(function (d) {
-    return '<a class="iss" href="' + pub + '/issue?d=' + encodeURIComponent(d) + '"><span class="d">' + d.replace(/\./g, ". ") + '</span><span class="go">기획 데일리 &rarr;</span></a>';
+    return '<a class="iss" href="' + pub + '/issue?d=' + encodeURIComponent(d) + '"><span class="d">' + d.replace(/\./g, ". ") + ' <span class="dow">(' + kstWeekday(d) + ')</span></span><span class="go">기획 데일리 &rarr;</span></a>';
   }).join("");
   const list = issues.length
     ? '<div class="list">' + rows + '</div>'
@@ -403,6 +403,7 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 .iss{display:flex;align-items:center;justify-content:space-between;gap:12px;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--line);padding:14px 16px;margin-bottom:8px;transition:border-color .15s,box-shadow .15s}
 .iss:hover{border-color:var(--ink);box-shadow:0 2px 0 var(--brand)}
 .iss .d{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.iss .dow{color:var(--muted);font-weight:600}
 .iss .go{font-size:13px;color:var(--muted)}
 .empty{background:var(--surface);border:1px dashed var(--line);padding:26px 20px;text-align:center;font-size:14px;color:var(--muted);line-height:1.9}
 .tools{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;color:var(--muted);text-decoration:none;transition:color .15s}
@@ -817,7 +818,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
-      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} · SAMSUNG DA 기획 도구모음</div>
+      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
       <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 뉴스 · 아이디어 · 보고서</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
@@ -862,4 +863,11 @@ function kstDate(ts = Date.now()) {
   const k = new Date(ts + 9 * 3600 * 1000);
   const p = n => String(n).padStart(2, "0");
   return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())}`;
+}
+// YYYY.MM.DD → 한글 요일(월~일). 발송 제목·아카이브 날짜 옆 표기용.
+const WEEKDAYS_KO = ["일", "월", "화", "수", "목", "금", "토"];
+function kstWeekday(dateStr) {
+  const m = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(dateStr || "");
+  if (!m) return "";
+  return WEEKDAYS_KO[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()];
 }
