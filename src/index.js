@@ -260,7 +260,27 @@ async function handleSubscribe(request, env) {
     await env.RESEARCH.put(await subKey(email), JSON.stringify({ email, createdAt: Date.now() }),
       { httpMetadata: { contentType: "application/json" } });
   } catch (e) { return json({ ok: false, error: "store_failed" }, 500); }
+  await sendWelcome(env, email);  // 확인 메일 발송(실패해도 구독 성공엔 영향 없음)
   return json({ ok: true, email });
+}
+// 구독 신청 확인 메일 — Resend 로 즉시 발송. 키/네트워크 실패는 조용히 무시(구독은 이미 저장됨).
+async function sendWelcome(env, email) {
+  if (!env.RESEND_API_KEY) return;
+  const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
+  const token = await signToken(email, signKey(env));
+  const unsub = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>",
+        to: [email],
+        subject: "📊 기획 데일리 · 구독 신청이 완료되었습니다",
+        html: welcomeEmail(pub, unsub),
+      }),
+    });
+  } catch { /* 확인 메일 실패 무시 */ }
 }
 async function handleUnsub(url, env) {
   const email = String(url.searchParams.get("e") || "").trim().toLowerCase();
@@ -452,7 +472,6 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 
   <section class="subscribe">
     <h2 class="sec">구독 신청</h2>
-    <p class="lead">매일 발행되는 브리핑을 메일로 받아봅니다. 사내 메일 주소로 신청해 주세요.</p>
     <div class="form">
       <input id="email" type="email" inputmode="email" placeholder="name@samsung.com" autocomplete="email">
       <button id="sub" type="button">구독</button>
@@ -895,6 +914,31 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
   </div>
 </td></tr>
 </table>
+</body></html>`;
+}
+
+// 구독 신청 확인 메일 본문(HTML). pub=공개 URL, unsub=수신거부 링크.
+function welcomeEmail(pub, unsub) {
+  const latest = pub ? `${pub}/latest` : "#";
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"></head>
+<body style="margin:0;padding:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0"><tr><td align="center">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
+    <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
+      <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
+      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">SAMSUNG DA 기획 도구모음</div>
+    </td></tr>
+    <tr><td style="padding:28px 22px 24px">
+      <div style="font-size:16px;font-weight:700;color:${T.text};line-height:1.6">구독 신청이 완료되었습니다.</div>
+      <div style="margin-top:12px;font-size:14px;color:${T.muted};line-height:1.75">이제 매일 아침(월~금) 지표와 뉴스에 의미를 더한 <b style="color:${T.text}">기획 데일리</b> 브리핑을 이 메일 주소로 받아보실 수 있습니다. 다음 발행 호부터 도착합니다.</div>
+      <div style="margin-top:20px"><a href="${latest}" style="display:inline-block;padding:10px 18px;background:${T.brand};color:#fff;font-size:14px;font-weight:700;text-decoration:none">최근 호 보기 →</a></div>
+    </td></tr>
+    <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
+      <div style="font-size:11px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="${unsub}" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+    </td></tr>
+  </table>
+</td></tr></table>
 </body></html>`;
 }
 
