@@ -42,11 +42,11 @@ const FRED = {
   houst: "HOUST", exhome: "EXHOSLUSM495S", umich: "UMCSENT", ironore: "PIORECRUSDM",
 };
 
-// DA 디자인 토큰
+// CI 팔레트 (competitor_intelligence 상속)
 const T = {
-  bg: "#f6f7f9", surface: "#ffffff", text: "#1a1d21",
-  muted: "#5b6470", border: "#e6e9ee", brand: "#1257d6",
-  up: "#d13b3b", down: "#1257d6",
+  bg: "#EDEFEC", surface: "#FFFFFF", text: "#17222D",
+  muted: "#5C6B79", border: "#D3D9D6", brand: "#46647E",
+  up: "#B02E24", down: "#46647E",
 };
 
 export default {
@@ -409,7 +409,7 @@ export function renderEmail(data, opts = {}) {
   const q = data.q, m = data.macro, s = data.scfi;
   const sm0 = (data.summary && typeof data.summary === "object") ? data.summary : { hero: String(data.summary || "") };
   const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
-  const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};border-radius:0 8px 8px 0;font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
+  const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
 
   // 원가 (전부 MoM)
   const fxParts = [
@@ -488,17 +488,17 @@ export function renderEmail(data, opts = {}) {
   return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:${T.bg};font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
-${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.brand};color:#fff;font-size:11px;font-weight:800;letter-spacing:.14em;padding:5px 11px;border-radius:6px;box-shadow:0 2px 8px rgba(18,87,214,.35)">SAMPLE</div>` : ""}
+${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.text};color:${T.bg};font-size:11px;font-weight:700;letter-spacing:.14em;padding:4px 10px">SAMPLE</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
-  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-radius:14px;overflow:hidden">
-    <tr><td style="padding:24px 22px 16px;border-bottom:1px solid ${T.border};text-align:center">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
+    <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
       <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} · SAMSUNG DA 기획 도구모음</div>
       <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 경쟁사 · 뉴스 · 아이디어 · 보고서</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
-      <div style="background:${T.bg};border:1px solid ${T.border};border-radius:12px;padding:16px 18px">
+      <div style="background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${T.brand};padding:16px 18px">
         <div style="font-size:10px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 맥락</div>
         <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
@@ -528,7 +528,7 @@ function unsubPage(ok, email) {
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>수신거부</title></head>
 <body style="margin:0;background:${T.bg};font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:${T.text}">
-<div style="max-width:420px;margin:80px auto;padding:32px 28px;background:#fff;border:1px solid ${T.border};border-radius:14px;text-align:center">
+<div style="max-width:420px;margin:80px auto;padding:32px 28px;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};text-align:center">
   <div style="font-size:17px;font-weight:800;margin-bottom:10px">기획 데일리</div>
   <div style="font-size:14px;color:${T.muted};line-height:1.7">${msg}</div>
   <a href="https://samsungda.net" style="display:inline-block;margin-top:20px;color:${T.brand};font-size:13px;font-weight:600;text-decoration:none">도구모음으로 →</a>
