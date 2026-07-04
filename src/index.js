@@ -1,13 +1,12 @@
 // samsungda-newsletter — 기획 데일리 (Cloudflare Worker + Cron)
 //
-// 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재·운임(전월)
+// 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재(전월)·운임 FBX(일간, R2 갱신)
 //         [소비] 금리 美10Y(전일)·수요 홈빌더ITB/소비재XLY(전일)·주간 실업수당청구/30Y모기지(전주)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
-//         [경쟁사] 가전(WHR·LG·Midea·Haier)·HVAC(Carrier·Trane·Daikin) 전일 대비
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=3mo → 전일·1개월전)·FRED CSV(무키 월간지표)·R2 samsungda-research.
 // 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
-//         + 소비/원가/경쟁사 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
+//         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 
@@ -15,7 +14,7 @@ const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
-const SCFI_KEY = "signals/scfi.json";
+const FBX_KEY = "signals/fbx.json";  // FBX(Freightos Baltic Index) 일간 운임지수 — R2 수동/외부 갱신
 const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
 const GRADE_W = { "긴급": 3, "주요": 2, "주시": 1, "참고": 0 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -25,15 +24,6 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
-
-// 경쟁사 바스켓 (Yahoo 심볼)
-const COMP_APPLIANCE = [
-  { n: "Whirlpool", s: "WHR" }, { n: "LG전자", s: "066570.KS" },
-  { n: "Midea", s: "000333.SZ" }, { n: "Haier", s: "600690.SS" },
-];
-const COMP_HVAC = [
-  { n: "Carrier", s: "CARR" }, { n: "Trane", s: "TT" }, { n: "Daikin", s: "6367.T" },
-];
 
 // FRED 시리즈
 const FRED = {
@@ -190,19 +180,16 @@ async function run(env, { send }) {
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
   const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
-  const compAll = [...COMP_APPLIANCE, ...COMP_HVAC];
-  const [yq, comp, macro, scfi, news, ideas, reports] = await Promise.all([
+  const [yq, macro, freight, news, ideas, reports] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
-    Promise.all(compAll.map(c => yahoo(c.s))),
     getMacro(),
-    getScfi(env),
+    getFreight(env),
     getNews(),
     getIdeas(env),
     getReports(env),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
-  const compData = compAll.map((c, i) => ({ ...c, q: comp[i] }));
-  const data = { date: kstDate(), q, comp: compData, macro, scfi, news, ideas, reports };
+  const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
   data.summary = await aiSummary(env, data);
   return data;
 }
@@ -254,9 +241,9 @@ async function getMacro() {
   Object.keys(FRED_WEEKLY).forEach((k, i) => s[k] = fredStat(wRows[i]));  // mom = 전주比
   return s;
 }
-async function getScfi(env) {
+async function getFreight(env) {
   if (!env.RESEARCH) return null;
-  try { const o = await env.RESEARCH.get(SCFI_KEY); if (o) return await o.json(); } catch { /* ignore */ }
+  try { const o = await env.RESEARCH.get(FBX_KEY); if (o) return await o.json(); } catch { /* ignore */ }
   return null;
 }
 async function getNews() {
@@ -304,7 +291,7 @@ function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s;
 const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 100;
 function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
 function summaryContext(data) {
-  const q = data.q, m = data.macro, s = data.scfi, L = [];
+  const q = data.q, m = data.macro, s = data.freight, L = [];
   if (q["KRW=X"]) L.push(`원/달러 ${q["KRW=X"].price.toFixed(1)} (전일 ${sPct(pctOf(q["KRW=X"].price, q["KRW=X"].prevDay))})`);
   if (q["MXN=X"]) L.push(`페소 ${q["MXN=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["MXN=X"].price, q["MXN=X"].prevDay))})`);
   if (q["THB=X"]) L.push(`바트 ${q["THB=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["THB=X"].price, q["THB=X"].prevDay))})`);
@@ -314,7 +301,7 @@ function summaryContext(data) {
   if (q["CL=F"]) L.push(`WTI ${q["CL=F"].price.toFixed(1)} (전일 ${sPct(pctOf(q["CL=F"].price, q["CL=F"].prevDay))})`);
   if (q["HG=F"]) L.push(`구리 ${q["HG=F"].price.toFixed(2)} (전월 ${sPct(pctOf(q["HG=F"].price, q["HG=F"].prevMonth))})`);
   if (m.ironore) L.push(`철광석 전월 ${sPct(m.ironore.mom)}`);
-  if (s && s.value != null) L.push(`SCFI ${s.value}`);
+  if (s && s.value != null) L.push(`FBX(운임) ${s.value}${s.mom != null ? ` (전일 ${sPct(s.mom)})` : ""}`);
   if (q["^TNX"]) L.push(`美10Y ${q["^TNX"].price.toFixed(2)}% (전일 ${sPct(pctOf(q["^TNX"].price, q["^TNX"].prevDay))})`);
   if (q["ITB"]) L.push(`홈빌더ETF(ITB) ${q["ITB"].price.toFixed(2)} (전일 ${sPct(pctOf(q["ITB"].price, q["ITB"].prevDay))})`);
   if (q["XLY"]) L.push(`소비재ETF(XLY) ${q["XLY"].price.toFixed(2)} (전일 ${sPct(pctOf(q["XLY"].price, q["XLY"].prevDay))})`);
@@ -323,8 +310,6 @@ function summaryContext(data) {
   if (m.cpiUS) L.push(`美CPI 전년 ${sPct(m.cpiUS.yoy)}`);
   if (m.cpiKR) L.push(`韓CPI 전년 ${sPct(m.cpiKR.yoy)}`);
   if (m.umich) L.push(`美소비심리 ${m.umich.val.toFixed(1)}`);
-  const comps = (data.comp || []).map(c => c.q ? { n: c.n, d: pctOf(c.q.price, c.q.prevDay) } : null).filter(x => x && x.d != null);
-  if (comps.length) { comps.sort((a, b) => Math.abs(b.d) - Math.abs(a.d)); L.push(`경쟁사 최대변동 ${comps[0].n} ${sPct(comps[0].d)} (전일)`); }
   const heads = (data.news || []).map((n, i) => {
     const meta = [n.grade, n.lens, (n.products || []).join("/"), (n.competitors || []).join("/")].filter(Boolean).join("·");
     return `${i}. 「${n.headline}」 (${meta})\n   요약: ${n.summary || "-"}`;
@@ -341,7 +326,7 @@ function ruleSummary(data) {
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 원가·소비 지표 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
-  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "", comp: "" }, newsWhy: {} };
+  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "" }, newsWhy: {} };
 }
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
@@ -360,13 +345,12 @@ async function aiSummary(env, data) {
             "삼성전자 생활가전(DA) 기획자를 위한 데일리 브리핑을 쓴다.",
             "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
-            '{"hero":"...","consume":"...","cost":"...","comp":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
+            '{"hero":"...","consume":"...","cost":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
             "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
             "- consume: 소비 환경(금리·수요ETF·주간지표·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
             "  · 물가·주택·심리가 월간이라 당일 신선한 델타가 없으면, 일간 프록시(10Y 전일·홈빌더ETF ITB 전일·소비재ETF XLY 전일)나 주간 지표(신규 실업수당청구·30Y 모기지 전주)를 근거로 소비 방향을 서술한다. 매일 최소 하나의 신선 신호를 담는다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
-            "- cost: 원가 환경(환율·유가·원자재·운임)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내.",
-            "- comp: 경쟁사 주가 움직임의 해석 한 문장(명사형 마무리) + 괄호로 근거(종목·변동률) 병기. 전체 75자 이내. 유의미한 변동이 없으면 빈 문자열.",
+            "- cost: 원가 환경(환율·유가·원자재·운임 FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. FBX(운임)는 컨테이너 수출 물류비 방향 신호로 해석.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
             "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
@@ -403,7 +387,7 @@ async function aiSummary(env, data) {
         const hero = str(parsed.hero, 280);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120), comp: str(parsed.comp, 120) },
+          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120) },
           newsWhy,
         };
       }
@@ -418,12 +402,12 @@ export function renderEmail(data, opts = {}) {
   const arrow = d => d == null ? "" : ` <span style="color:${d >= 0 ? T.up : T.down};font-weight:600">${d >= 0 ? "▲" : "▼"}${Math.abs(d).toFixed(2)}%</span>`;
   const chg = (cur, base) => (cur == null || base == null || !base) ? "" : arrow((cur - base) / base * 100);
   const mom = q => q ? chg(q.price, q.prevMonth) : "";   // 원가: 1개월전 대비(MoM)
-  const dchg = q => q ? chg(q.price, q.prevDay) : "";     // 경쟁사: 전일 대비
+  const dchg = q => q ? chg(q.price, q.prevDay) : "";     // 일간: 전일 대비
   const fmt = (n, d = 2) => n == null ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   const line = html => `<div style="padding:4px 0;font-size:14px;color:${T.text};line-height:1.55">• ${html}</div>`;
   const lbl = t => `<span style="color:${T.muted}">${t}</span>`;
   const dot = ' <span style="color:' + T.border + '">·</span> ';
-  const q = data.q, m = data.macro, s = data.scfi;
+  const q = data.q, m = data.macro, s = data.freight;
   const sm0 = (data.summary && typeof data.summary === "object") ? data.summary : { hero: String(data.summary || "") };
   const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
   const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
@@ -441,14 +425,14 @@ export function renderEmail(data, opts = {}) {
     q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${mom(q["HG=F"])}` : null,
     m.ironore ? `철광석 <b>$${fmt(m.ironore.val, 1)}/t</b>${arrow(m.ironore.mom)} <span style="color:${T.muted};font-size:12px">(${m.ironore.date})</span>` : null,
   ].filter(Boolean).join(dot);
-  const scfiVal = s && s.value != null
-    ? `<b>${fmt(s.value, 1)}</b>${s.mom != null ? arrow(s.mom) : ""} <span style="color:${T.muted};font-size:12px">(${s.asof ? esc(s.asof) : "수동 갱신"})</span>`
+  const fbxVal = s && s.value != null
+    ? `<b>${fmt(s.value, 0)}</b>${s.mom != null ? arrow(s.mom) : ""} <span style="color:${T.muted};font-size:12px">(${s.asof ? esc(s.asof) : "수동 갱신"})</span>`
     : `<b>—</b> <span style="color:${T.muted};font-size:12px">(수동 갱신)</span>`;
   const cost = [
     fxParts ? line(`${lbl("환율")} ${fxParts}`) : "",
     q["CL=F"] ? line(`${lbl("유가")} WTI <b>$${fmt(q["CL=F"].price)}</b>${dchg(q["CL=F"])}`) : "",
     matParts ? line(`${lbl("원자재")} ${matParts}`) : "",
-    line(`${lbl("운임")} SCFI ${scfiVal}`),
+    line(`${lbl("운임")} FBX ${fbxVal}`),
   ].join("");
 
   // 소비
@@ -475,13 +459,6 @@ export function renderEmail(data, opts = {}) {
       m.exhome ? `기존판매 <b>${fmt(m.exhome.val / 1e6, 2)}M</b>${arrow(m.exhome.mom)}` : null,
     ].filter(Boolean).join(dot)} <span style="color:${T.muted};font-size:12px">(${(m.houst || m.exhome).date})</span>`) : "",
     m.umich ? line(`${lbl("심리")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:12px">(${m.umich.date})</span>`) : "",
-  ].join("");
-
-  // 경쟁사 (전일 대비)
-  const basket = arr => arr.map(c => `${esc(c.n)}${c.q ? dchg(c.q) || " <span style='color:" + T.muted + "'>—</span>" : " <span style='color:" + T.muted + "'>—</span>"}`).join(" &nbsp;·&nbsp; ");
-  const comp = [
-    line(`${lbl("가전")} ${basket(data.comp.filter(c => COMP_APPLIANCE.some(a => a.s === c.s)))}`),
-    line(`${lbl("HVAC")} ${basket(data.comp.filter(c => COMP_HVAC.some(a => a.s === c.s)))}`),
   ].join("");
 
   // 콘텐츠
@@ -525,7 +502,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
       <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} · SAMSUNG DA 기획 도구모음</div>
-      <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 경쟁사 · 뉴스 · 아이디어 · 보고서</div>
+      <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 뉴스 · 아이디어 · 보고서</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
       <div style="background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${T.brand};padding:16px 18px">
@@ -534,8 +511,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${section("소비", consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
-    ${section("원가", cost, "환율·유가 전일 · 원자재·운임 전월", false, sm.sec.cost)}
-    ${section("경쟁사 주가", comp, "전일 대비", false, sm.sec.comp)}
+    ${section("원가", cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
@@ -544,7 +520,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
-    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더/소비재ETF·주가), FRED(실업수당청구·모기지·CPI·PCE·주택·소비심리·철광석). 비교시점: 환율·유가·수요ETF·경쟁사 전일, 주간지표 전주, 원자재·운임 전월, 물가 전년, 주택·심리 전월. 주간/월간지표는 최신 발표치 기준.
+    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더/소비재ETF), FRED(실업수당청구·모기지·CPI·PCE·주택·소비심리·철광석), FBX(Freightos Baltic Index·운임). 비교시점: 환율·유가·수요ETF·운임 전일, 주간지표 전주, 원자재 전월, 물가 전년, 주택·심리 전월. 주간/월간지표는 최신 발표치 기준.
   </div>
 </td></tr>
 </table>
