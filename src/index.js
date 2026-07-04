@@ -72,10 +72,18 @@ export default {
       }
       return json({ count: out.length, subscribers: out });
     }
-    if (url.pathname === "/" || url.pathname === "/latest") {
+    if (url.pathname === "/" || url.pathname === "/archive") return htmlResp(await archivePage(env));
+    if (url.pathname === "/latest") {
       const obj = await env.RESEARCH.get(NL_PREFIX + "latest.html");
       if (obj) return htmlResp(await obj.text());
       return new Response("아직 발행된 뉴스레터가 없습니다.", { status: 404 });
+    }
+    if (url.pathname === "/issue") {
+      const d = url.searchParams.get("d") || "";
+      if (!/^\d{4}\.\d{2}\.\d{2}$/.test(d)) return new Response("bad request", { status: 400 });
+      const obj = await env.RESEARCH.get(`${NL_PREFIX}${d}.html`);
+      if (obj) return htmlResp(await obj.text());
+      return new Response("해당 호를 찾을 수 없습니다.", { status: 404 });
     }
     return new Response("not found", { status: 404 });
   },
@@ -195,6 +203,118 @@ async function gatherData(env) {
 }
 async function buildEmail(env) {
   return renderEmail(await gatherData(env), { sample: true }).split("__UNSUB__").join("#");
+}
+
+// ---------- 뉴스레터 모음 (아카이브 + 구독) ----------
+async function listIssues(env) {
+  const out = [];
+  if (!env.RESEARCH) return out;
+  try {
+    let cursor;
+    do {
+      const listed = await env.RESEARCH.list({ prefix: NL_PREFIX, cursor });
+      for (const o of (listed.objects || [])) {
+        const m = o.key.match(/^newsletter\/(\d{4}\.\d{2}\.\d{2})\.html$/);
+        if (m) out.push(m[1]);
+      }
+      cursor = listed.truncated ? listed.cursor : null;
+    } while (cursor);
+  } catch { /* ignore */ }
+  out.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  return out;
+}
+async function archivePage(env) {
+  const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
+  const issues = await listIssues(env);
+  const rows = issues.map(function (d) {
+    return '<a class="iss" href="' + pub + '/issue?d=' + encodeURIComponent(d) + '"><span class="d">' + d.replace(/\./g, ". ") + '</span><span class="go">기획 데일리 &rarr;</span></a>';
+  }).join("");
+  const list = issues.length
+    ? '<div class="list">' + rows + '</div>'
+    : '<div class="empty"><b>아직 발행된 뉴스레터가 없습니다.</b><br>구독해 두시면 첫 호부터 메일로 받아보실 수 있습니다.</div>';
+  return `<!DOCTYPE html>
+<html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>뉴스레터 모음 · 기획 데일리</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+:root{--bg:#EDEFEC;--surface:#fff;--ink:#17222D;--muted:#5C6B79;--line:#D3D9D6;--brand:#46647E;--insight:#B02E24}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Pretendard",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;background:var(--bg);color:var(--ink);padding:56px 20px;line-height:1.6}
+.wrap{max-width:620px;margin:0 auto}
+header{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:24px}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--brand);margin-bottom:8px}
+h1{font-size:28px;font-weight:800;letter-spacing:-.5px}
+.sub{font-size:14px;color:var(--muted);margin-top:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--brand);padding:22px 20px;margin-bottom:28px}
+.card h2{font-size:15px;font-weight:700;margin-bottom:6px}
+.card .lead{font-size:13px;color:var(--muted);margin-bottom:14px}
+.form{display:flex;gap:8px}
+.form input{flex:1;font:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--line);background:#fff;color:var(--ink)}
+.form input:focus{outline:none;border-color:var(--brand)}
+.form button{font:inherit;font-size:14px;font-weight:700;padding:10px 18px;border:none;background:var(--brand);color:#fff;cursor:pointer;white-space:nowrap}
+.form button:hover{background:var(--ink)}
+.form button:disabled{opacity:.5;cursor:default}
+.msg{font-size:13px;margin-top:10px;min-height:18px}
+.msg.ok{color:var(--brand);font-weight:600}
+.msg.err{color:var(--insight);font-weight:600}
+h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
+.list{display:flex;flex-direction:column}
+.iss{display:flex;align-items:center;justify-content:space-between;gap:12px;text-decoration:none;color:inherit;background:var(--surface);border:1px solid var(--line);padding:14px 16px;margin-bottom:8px;transition:border-color .15s,box-shadow .15s}
+.iss:hover{border-color:var(--ink);box-shadow:0 2px 0 var(--brand)}
+.iss .d{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.iss .go{font-size:13px;color:var(--muted)}
+.empty{background:var(--surface);border:1px dashed var(--line);padding:26px 20px;text-align:center;font-size:14px;color:var(--muted);line-height:1.9}
+.back{display:inline-block;margin-top:28px;font-size:13px;color:var(--muted);text-decoration:none}
+.back:hover{color:var(--ink)}
+</style></head><body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">기획 데일리</div>
+    <h1>뉴스레터 모음</h1>
+    <p class="sub">지표와 뉴스에 의미를 더한 데일리 브리핑입니다. 지난 호를 모아보고 메일 구독을 신청할 수 있습니다.</p>
+  </header>
+
+  <div class="card">
+    <h2>메일 구독</h2>
+    <p class="lead">매일 발행되는 브리핑을 메일로 받아봅니다. 사내 메일 주소로 신청해 주세요.</p>
+    <div class="form">
+      <input id="email" type="email" inputmode="email" placeholder="name@samsung.com" autocomplete="email">
+      <button id="sub" type="button">구독</button>
+    </div>
+    <div class="msg" id="msg" aria-live="polite"></div>
+  </div>
+
+  <h2 class="sec">지난 호</h2>
+  ${list}
+
+  <a class="back" href="https://samsungda.net">&larr; 기획도구 모음으로</a>
+</div>
+<script>
+(function(){
+  var btn=document.getElementById("sub"),inp=document.getElementById("email"),msg=document.getElementById("msg");
+  function show(t,cls){msg.textContent=t;msg.className="msg "+(cls||"");}
+  function looksEmail(e){var at=e.indexOf("@");return at>0 && e.indexOf(".",at)>at+1;}
+  function submit(){
+    var email=(inp.value||"").trim();
+    if(!looksEmail(email)){show("올바른 이메일 주소를 입력해 주세요.","err");return;}
+    btn.disabled=true;show("신청 중...","");
+    fetch(location.origin+"/subscribe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:email})})
+      .then(function(r){return r.json().catch(function(){return {};});})
+      .then(function(j){
+        if(j&&j.ok){show("구독 신청이 완료되었습니다.","ok");inp.value="";}
+        else if(j&&j.error==="domain_not_allowed"){show("허용되지 않은 도메인입니다.","err");}
+        else if(j&&j.error==="invalid_email"){show("올바른 이메일 주소를 입력해 주세요.","err");}
+        else{show("신청에 실패했습니다. 잠시 후 다시 시도해 주세요.","err");}
+      })
+      .catch(function(){show("신청에 실패했습니다. 네트워크를 확인해 주세요.","err");})
+      .finally(function(){btn.disabled=false;});
+  }
+  btn.addEventListener("click",submit);
+  inp.addEventListener("keydown",function(e){if(e.key==="Enter")submit();});
+})();
+</script>
+</body></html>`;
 }
 
 // Yahoo 차트: 최근 3개월 일봉 → 최신·전일·1개월전(≈21거래일)
