@@ -781,9 +781,11 @@ export function renderEmail(data, opts = {}) {
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-        <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
-        ${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`;
+        <div style="background:${T.bg};padding:7px 10px">
+          <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
+        </div>
+        <div style="padding:0 10px">${newsWhyRows(sm.newsWhy[ni])}
+        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div></div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
@@ -791,8 +793,10 @@ export function renderEmail(data, opts = {}) {
         const dir = i.dir === "profit" ? "수익" : "매출";
         const memo = i.memo ? `<div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
-          <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>${memo}</div>`;
+          <div style="background:${T.bg};padding:7px 10px">
+            <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
+            <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>
+          </div>${memo ? `<div style="padding:0 10px">${memo}</div>` : ""}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
