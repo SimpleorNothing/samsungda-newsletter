@@ -242,7 +242,7 @@ async function archivePage(env) {
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Pretendard",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;background:var(--bg);color:var(--ink);padding:56px 20px;line-height:1.6}
 .wrap{max-width:620px;margin:0 auto}
-header{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:24px}
+header{position:relative;border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:24px}
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--brand);margin-bottom:8px}
 h1{font-size:28px;font-weight:800;letter-spacing:-.5px}
 .sub{font-size:14px;color:var(--muted);margin-top:8px}
@@ -264,11 +264,13 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 .iss .d{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
 .iss .go{font-size:13px;color:var(--muted)}
 .empty{background:var(--surface);border:1px dashed var(--line);padding:26px 20px;text-align:center;font-size:14px;color:var(--muted);line-height:1.9}
-.back{display:inline-block;margin-top:28px;font-size:13px;color:var(--muted);text-decoration:none}
-.back:hover{color:var(--ink)}
+.tools{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;color:var(--muted);text-decoration:none;transition:color .15s}
+.tools:hover{color:var(--ink)}
+.tools svg{width:15px;height:15px;flex:0 0 auto}
 </style></head><body>
 <div class="wrap">
   <header>
+    <a class="tools" href="https://samsungda.net"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.8"><rect x="3.8" y="3.8" width="7" height="7" rx="1.2"/><rect x="13.2" y="3.8" width="7" height="7" rx="1.2"/><rect x="3.8" y="13.2" width="7" height="7" rx="1.2"/><rect x="13.2" y="13.2" width="7" height="7" rx="1.2"/></g></svg>도구모음</a>
     <div class="eyebrow">기획 데일리</div>
     <h1>뉴스레터 모음</h1>
     <p class="sub">지표와 뉴스에 의미를 더한 데일리 브리핑입니다. 구독하면 매일 아침 메일로 받으실 수 있습니다.</p>
@@ -286,8 +288,6 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
     </div>
     <div class="msg" id="msg" aria-live="polite"></div>
   </section>
-
-  <a class="back" href="https://samsungda.net">&larr; 기획도구 모음으로</a>
 </div>
 <script>
 (function(){
