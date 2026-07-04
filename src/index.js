@@ -338,13 +338,9 @@ async function run(env, { send }) {
     const token = await signToken(email, signKey(env));
     const link = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
     const html = base.split("__UNSUB__").join(link);
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [email], subject, html }),
-    });
-    if (res.ok) sent++;
-    else { failed++; const j = await res.json().catch(() => ({})); errs.push(j.message || res.status); }
+    const r = await sendResend(env, { to: email, subject, html });
+    if (r.ok) sent++;
+    else { failed++; errs.push(r.error); }
   }
   return { ok: failed === 0, sent, failed, errors: errs.slice(0, 3) };
 }
