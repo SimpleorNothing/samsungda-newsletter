@@ -1044,10 +1044,8 @@ export function renderEmail(data, opts = {}) {
         layout: { padding: { top: 6, left: 12, right: 12, bottom: 2 } },
       },
     };
-    // 그라데이션: 플롯 영역(chartArea)에 정확히 매핑되는 Chart.js 스크립터블 함수로 생성 —
-    // 상단(라인 쪽) 진함 → 하단(플롯 바닥) 완전 투명. (헬퍼는 x축 라벨 영역까지 캔버스 전체에 매핑돼 바닥이 안 투명해지는 문제 회피)
-    const gradFn = `function(c){var a=c.chart.chartArea;if(!a)return '${rgba(lineCol, 0.16)}';var g=c.chart.ctx.createLinearGradient(0,a.top,0,a.bottom);g.addColorStop(0,'${rgba(lineCol, 0.42)}');g.addColorStop(1,'${rgba(lineCol, 0)}');return g;}`;
-    const json = JSON.stringify(c).replace('"__GRAD__"', gradFn);
+    // 그라데이션: QuickChart 내장 헬퍼(v4 지원·확실히 렌더). 3-스톱으로 상단 진함→중간 옅음→바닥 완전 투명(TradingView풍).
+    const json = JSON.stringify(c).replace('"__GRAD__"', `getGradientFillHelper('vertical', ['${rgba(lineCol, 0.42)}','${rgba(lineCol, 0.08)}','${rgba(lineCol, 0)}'])`);
     return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(json);
   };
   // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
@@ -1064,22 +1062,30 @@ export function renderEmail(data, opts = {}) {
     else if (mode === "bp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.round(Math.abs(abs) * 100)}bp`; }
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = favCol(dirBase, good);
-    // x축 양 끝=연월. 값(처음/마지막)은 그래프 바로 위 HTML 좌·우로 병기 — 그리는 라인 끝점과 일치하도록 spark 끝값 사용.
+    // x축 양 끝=연월. 값(처음/마지막)은 라인 끝점 위에 오버레이로 밀착 — 끝점의 세로 위치(값 기준)에 맞춰 배치.
     const fvt = (opts && opts.fvt) || (v => fmt(v));
     const sp = qi && qi.spark;
     const ready = !!(sp && sp.length >= 4);
     const ax = ready ? { m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date) } : null;
-    const vals = ready
-      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:200px;margin:10px 0 -2px;font-size:12px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
-          <td align="left" style="color:${T.muted}">${fvt(sp[0])}</td>
-          <td align="right" style="color:${T.muted}">${fvt(sp[sp.length - 1])}</td></tr></table>`
-      : "";
+    // 끝점 세로 위치(%): 차트 400x332, 플롯영역 top=7·bottom=284.4(측정값), y축 min~max. 라벨은 점보다 살짝 위·플롯 안으로 clamp.
+    const lblTop = v => {
+      const lo = Math.min(...sp), hi = Math.max(...sp), span = (hi - lo) || 1;
+      const yf = (7 + (hi - v) / span * (284.4 - 7)) / 332;
+      return (Math.max(0, Math.min(0.80, yf - 0.12)) * 100).toFixed(1);
+    };
+    const lS = `position:absolute;font-size:12px;font-weight:700;color:${T.muted};font-variant-numeric:tabular-nums;background:rgba(255,255,255,.72);padding:0 2px;white-space:nowrap;line-height:1.2`;
     const url = qi ? sparkUrl(qi.spark, dirBase, good, ax) : "";
-    const img = url ? `<img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;max-width:200px;height:auto;margin:0 0 4px">` : `<div style="height:150px;margin:0 0 4px"></div>`;
+    const img = url
+      ? `<div style="position:relative;width:100%;max-width:200px;margin:2px 0 4px">
+          <img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;height:auto">
+          <span style="${lS};top:${ready ? lblTop(sp[0]) : "0"}%;left:2%">${ready ? fvt(sp[0]) : ""}</span>
+          <span style="${lS};top:${ready ? lblTop(sp[sp.length - 1]) : "0"}%;right:2%">${ready ? fvt(sp[sp.length - 1]) : ""}</span>
+        </div>`
+      : `<div style="height:150px;margin:2px 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
-        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${vals}${img}
+        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
         <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
