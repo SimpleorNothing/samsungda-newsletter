@@ -6,7 +6,7 @@
 | 섹션 | 출처 |
 | --- | --- |
 | 시장지표 | Yahoo(`^IXIC`·`^TNX`·`CL=F`·`^KS11`) + F&G(`ten-bagger/signals.json`) |
-| 가전 주요뉴스 | `mi.samsungda.net/data/news.json` (최근 24h, 등급·영향도 상위 5) |
+| 가전 산업 동향 | `mi.samsungda.net/data/news.json` (최근 24h, 등급·영향도 상위 5) |
 | 아이디어 뱅크 | R2 `samsungda-research` `idea-bank/*.json` (최신 5, 저장된 것 그대로) |
 | 클로드 작성 보고서 | R2 `samsungda-research` 루트 업로드(docx) 최신 5 |
 | (AI 요약 근거) CI 경쟁사 전략 추적 | `competitor_intelligence` 레포의 `strategies.json`·`evidence.json`을 raw.githubusercontent.com에서 직접 읽음(최신 6건). 화면에 별도 섹션으로 노출되진 않고, "오늘의 맥락" AI 요약 프롬프트의 근거로만 쓰인다. `ci.samsungda.net`은 포털 SSO 게이트가 걸려 있어 직접 fetch 불가하므로 public 레포 raw 원본을 참조. |

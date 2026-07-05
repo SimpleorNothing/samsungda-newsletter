@@ -1367,7 +1367,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
       <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
-      <div style="margin-top:10px;font-size:13px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 뉴스 · 아이디어 · 보고서</div>
+      <div style="margin-top:10px;font-size:13px;color:${T.muted};letter-spacing:.05em">수요 시그널 · 원가 시그널 · 가전 산업 동향 · 기획 인사이트</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
       <div style="background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${T.brand};padding:16px 18px">
@@ -1376,10 +1376,10 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("🛒 소비", consumeTrend + consume, "", true, sm.sec.consume)}
-    ${section("💰 원가", costTrend + cost, "", false, sm.sec.cost)}
-    ${section("📰 가전 주요뉴스", newsRows, "", false, sm.sec.news)}
-    ${section("🆕 New 아이디어/보고서", newRows)}
+    ${section("🛒 수요 시그널", consumeTrend + consume, "", true, sm.sec.consume)}
+    ${section("💰 원가 시그널", costTrend + cost, "", false, sm.sec.cost)}
+    ${section("📰 가전 산업 동향", newsRows, "", false, sm.sec.news)}
+    ${section("🆕 기획 인사이트", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
