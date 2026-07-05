@@ -1019,18 +1019,18 @@ export function renderEmail(data, opts = {}) {
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = favCol(dirBase, good);
     const url = qi ? sparkUrl(qi.spark, dirBase, good) : "";
-    const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:8px 0 4px">` : `<div style="height:84px;margin:8px 0 4px"></div>`;
-    // 그래프 양 끝(처음=6개월 전·마지막=현재) 수치를 차트 아래 좌·우 정렬로 병기. fv 없으면 기본 포맷.
+    const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:2px 0 6px">` : `<div style="height:84px;margin:2px 0 6px"></div>`;
+    // 그래프 양 끝(처음=6개월 전·마지막=현재) 수치를 차트 위 좌·우 정렬로 병기. fv 없으면 기본 포맷.
     const fv = (opts && opts.fv) || (v => fmt(v));
     const ends = (qi && qi.first6m != null && qi.price != null)
-      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:180px;margin:0 0 6px;font-size:11px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:180px;margin:8px 0 0;font-size:11px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
           <td align="left" style="color:${T.muted}">${fv(qi.first6m)}</td>
           <td align="right" style="color:${T.muted}">${fv(qi.price)}</td></tr></table>`
       : "";
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
-        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}${ends}
+        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${ends}${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
         <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
