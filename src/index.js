@@ -1130,7 +1130,7 @@ export function renderEmail(data, opts = {}) {
     ? data.ideas.map(i => {
         const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>${memo}</div>`;
+          <span style="font-size:14px;font-weight:600;color:${T.text}">💡 ${esc(i.title)}</span>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
