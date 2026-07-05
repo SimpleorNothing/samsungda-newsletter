@@ -981,15 +981,25 @@ function sectionInsights(data) {
     consume = `${lead}${tail} (${conEv.join("·")})`;
   }
 
-  // ── 가전뉴스: 종합 구도(구조적 요약) ──
+  // ── 가전뉴스: 테마·전략축 기반 구조 요약 (건수·제목 나열 대신 '무엇에 관한 소식인지' + LG 전략축) ──
   const nv = data.news || [];
   let news = "";
   if (nv.length) {
+    // 제품 테마 상위 (에어컨·빌트인·공조 등)
+    const pc = {}; nv.forEach(n => (n.products || []).forEach(p => { if (p) pc[p] = (pc[p] || 0) + 1; }));
+    const topProd = Object.entries(pc).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
+    // LG 전략축(A1~A6) 클러스터 — 각 뉴스 표면 매칭 후 최다 빈도 상위 2축
+    const axHits = {};
+    nv.forEach(n => { const seen = new Set(); for (const a of matchAxes(n)) { if (seen.has(a.code)) continue; seen.add(a.code); (axHits[a.code] = axHits[a.code] || { code: a.code, title: a.title, cnt: 0 }).cnt++; } });
+    const topAx = Object.values(axHits).sort((a, b) => b.cnt - a.cnt).slice(0, 2);
     const comp = [...new Set(nv.flatMap(n => n.competitors || []))].slice(0, 3);
     const lc = {}; nv.forEach(n => { if (n.lens) lc[n.lens] = (lc[n.lens] || 0) + 1; });
     const dom = Object.entries(lc).sort((a, b) => b[1] - a[1])[0];
-    const top = nv[0];
-    news = `가전뉴스 ${nv.length}건${top && top.headline ? ` — \u300C${top.headline}\u300D 등` : ""}${comp.length ? ` ${comp.join("·")} 동향 중심` : ""}${dom ? `, ${dom[0]} 신호 비중이 큼` : ""}`;
+    const head = topProd.length ? `${topProd.join("·")} 관련 소식이 주를 이룸` : "가전 전반 동향";
+    const compPart = comp.length ? `, ${comp.join("·")} 중심` : "";
+    const axPart = topAx.length ? ` — LG 전략축 ${topAx.map(a => `${a.code}(${a.title})`).join("·")}에 닿는 신호` : "";
+    const lensPart = dom ? `, ${dom[0]} 비중이 큼` : "";
+    news = `${head}${compPart}${axPart}${lensPart} (${nv.length}건)`;
   }
 
   return { consume, cost, news };
@@ -1032,7 +1042,7 @@ async function aiSummary(env, data) {
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
             "- cost: 원가 환경(유가·철강·원자재·환율·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 유가·철강·구리·환율은 6개월 추이 방향으로 해석하고 괄호에 6개월 델타 병기(예: 'WTI 6M +18%·철강 6M +6%·원/달러 6M +6%'). 운임은 발표주기 특성상 SCFI/FBX 전주比로 서술 — SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임.",
             "  · 유가·철강 등 원가가 6개월 기준 상승했더라도 최근 고점 대비 되돌아왔다면 '6개월 높지만 고점 대비 진정' 식으로 국면(상승 지속 vs 고점 후 조정)을 구분해 서술한다.",
-            "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
+            "- newsSummary: 오늘 가전 주요뉴스를 관통하는 핵심 의미 한 문장(명사형 마무리). 건수·개별 제목 나열 금지 — 무엇에 관한 소식이 주를 이루는지 주제를 짚는다(예: 'B2B 공조·에어컨 확대 흐름', 'LG 빌트인 통한 B2B 확장'). [LG 전략축 관련 뉴스]가 제공되면 어느 축(예: A2 HVAC·AIDC)에 닿는 흐름인지 한 번 명시한다. 전체 90자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
             "  · opportunity: 두 번째 점 문장 — 당사의 현황·강점·포지션(수요·원가·제품 포트폴리오·역외 거점 관점)을 짚어 이 소식이 당사에 유리하게 작용하는 지점을 한 문장(80자 이내)으로 쓴다. '기회:' 같은 라벨을 쓰지 말고 자연스러운 서술식 문장으로 쓴다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 시작말·맺음말을 항목마다 바꿔 쓴다. 시작말은 '당사는'에만 매이지 말고 '당사도'·'당사 입장에선'·'우리 DA엔'·'당사 관점에선' 등에서 돌려 쓰며, 같은 호 안에서 동일 시작말·맺음말을 반복하지 않는다. 유리한 단서가 약하면 빈 문자열 대신 '당사에 유리하게 읽을 만한 단서는 아직 제한적이다'처럼 근거 부족을 서술한다.",
