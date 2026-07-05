@@ -35,8 +35,8 @@
 `newsletter.samsungda.net` 커스텀 도메인을 붙이면 `/preview`·`/latest`를 브라우저에서 열람 가능.
 
 
-## 운임지수 수동 갱신
-SCFI/FBX는 cron·발송 시 주 1회 web_search로 갱신해 R2 `signals/fbx.json`에 캐시합니다. 미리보기에서 즉시 갱신하려면 보호 키를 붙여 호출합니다.
+## 운임지수 갱신 · SCFI 6개월 추이
+SCFI/FBX는 cron·발송 시 하루 1회 web_search로 갱신해 R2 `signals/fbx.json`에 캐시합니다(같은 날 재실행은 skip). 미리보기에서 즉시 갱신하려면 보호 키를 붙여 호출합니다.
 
 ```bash
 /refresh-freight?key=<TRIGGER_KEY>
@@ -44,5 +44,9 @@ SCFI/FBX는 cron·발송 시 주 1회 web_search로 갱신해 R2 `signals/fbx.js
 ```
 
 SCFI 공식 페이지는 Shanghai Shipping Exchange 영문 SCFI 페이지(`https://en.sse.net.cn/indices/scfinew.jsp`)를 우선 확인하되, 공개 JSON API가 없어 이미지/로그인 제한으로 직접 추출이 안 되면 신뢰 가능한 해운·물류 보도 최신치를 web_search로 보완합니다.
+
+SCFI 6개월 추이 그래프는 두 소스를 합칩니다.
+- **Seed**: `src/scfi-seed.js` — 앱에서 전달된 `SCFI_Data_5years.xlsx` 주간 시계열(2021-07 ~ 2026-06, 249건)을 기본 히스토리로 사용해 배포 즉시 6개월 선이 그려집니다.
+- **누적**: 매일 web_search로 확인한 최신 SCFI 발표치를 발표일(asof) 기준으로 R2 `signals/scfi-history.json`에 upsert합니다. seed + 누적 + 오늘 관측치를 날짜로 병합해 최근 6개월(≈26주) 구간을 스파크라인으로 그립니다. 발표일 기준 upsert라 같은 주 재확인은 중복 없이 무해합니다.
 ## 디자인
 DA 토큰(흰 배경·`#1257d6`·라운드 카드). 이메일 클라이언트 호환 위해 table+inline CSS, 한글 시스템 폰트 폴백.
