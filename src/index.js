@@ -1083,9 +1083,9 @@ async function aiSummary(env, data) {
             "  · 유가·철강 등 원가가 6개월 기준 상승했더라도 최근 고점 대비 되돌아왔다면 '6개월 높지만 고점 대비 진정' 식으로 국면(상승 지속 vs 고점 후 조정)을 구분해 서술한다.",
             "- newsSummary: 오늘 가전 주요뉴스를 관통하는 핵심 의미 한 문장(명사형 마무리). 건수·개별 제목 나열 금지 — 무엇에 관한 소식이 주를 이루는지 주제를 짚는다(예: 'B2B 공조·에어컨 확대 흐름', 'LG 빌트인 통한 B2B 확장'). [LG 전략축 관련 뉴스]가 제공되면 어느 축(예: A2 HVAC·AIDC)에 닿는 흐름인지 한 번 명시한다. 전체 90자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
-            "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
-            "  · opportunity: 두 번째 점 문장 — 당사의 현황·강점·포지션(수요·원가·제품 포트폴리오·역외 거점 관점)을 짚어 이 소식이 당사에 유리하게 작용하는 지점을 한 문장(80자 이내)으로 쓴다. '기회:' 같은 라벨을 쓰지 말고 자연스러운 서술식 문장으로 쓴다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 시작말·맺음말을 항목마다 바꿔 쓴다. 시작말은 '당사는'에만 매이지 말고 '당사도'·'당사 입장에선'·'우리 DA엔'·'당사 관점에선' 등에서 돌려 쓰며, 같은 호 안에서 동일 시작말·맺음말을 반복하지 않는다. 유리한 단서가 약하면 빈 문자열 대신 '당사에 유리하게 읽을 만한 단서는 아직 제한적이다'처럼 근거 부족을 서술한다.",
-            "  · threat: 세 번째 점 문장 — 경쟁사·시장·정책의 움직임(경쟁 심화·원가 상승·규제·수요 둔화 관점)이 당사에 가하는 압박을 한 문장(80자 이내)으로 쓴다. '위협:' 같은 라벨을 쓰지 말고 자연스러운 서술식 문장으로 쓴다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 시작말·맺음말을 항목마다 바꿔 쓴다. 시작말은 '반면'에만 매이지 말고 '다만'·'한편'·'그러나'·'경쟁 측면에선' 등 대비 접속을 돌려 쓰며, 같은 호 안에서 동일 시작말·맺음말을 반복하지 않는다. 부담 단서가 약하면 빈 문자열 대신 '당장 부담으로 이어질 단서는 아직 제한적이다'처럼 근거 부족을 서술한다.",
+            "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심을 명사형(체언)으로 끝맺는 한 구(60자 이내). 항상 채운다.",
+            "  · opportunity: 두 번째 점 — 당사의 현황·강점·포지션(수요·원가·제품 포트폴리오·역외 거점 관점)을 짚어 이 소식이 당사에 유리하게 작용하는 지점을 한 구(80자 이내)로 쓴다. '기회:' 같은 라벨을 쓰지 말고, '~다/~된다/~있다' 같은 서술형 종결 없이 명사형(체언)으로 끝맺는다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 도입부를 항목마다 바꿔 쓴다. 도입은 '당사'에만 매이지 말고 '당사도'·'당사 입장'·'우리 DA'·'당사 관점' 등에서 돌려 쓰며, 같은 호 안에서 동일 도입·동일 명사 종결을 반복하지 않는다. 유리한 단서가 약하면 빈 문자열 대신 '당사에 유리하게 읽을 단서는 제한적'처럼 근거 부족을 명사형으로 적는다.",
+            "  · threat: 세 번째 점 — 경쟁사·시장·정책의 움직임(경쟁 심화·원가 상승·규제·수요 둔화 관점)이 당사에 가하는 압박을 한 구(80자 이내)로 쓴다. '위협:' 같은 라벨을 쓰지 말고, '~다/~된다/~있다' 같은 서술형 종결 없이 명사형(체언)으로 끝맺는다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 도입부를 항목마다 바꿔 쓴다. 도입은 '반면'에만 매이지 말고 '다만'·'한편'·'경쟁 측면' 등 대비 어구를 돌려 쓰며, 같은 호 안에서 동일 도입·동일 명사 종결을 반복하지 않는다. 부담 단서가 약하면 빈 문자열 대신 '당장 부담으로 이어질 단서는 제한적'처럼 근거 부족을 명사형으로 적는다.",
             "  · 세 필드 모두 사실·방향 서술만 담는다. '검토 필요'·'대응해야'·'추진 여지' 等 실행 제안·액션 권고 금지 (실행 판단은 사람의 몫).",
             "  · 헤드라인·요약에 없는 사실·수치 창작 금지. content·opportunity·threat는 모두 채워 세 개의 점 문장이 나오게 한다. 단, opportunity·threat 근거가 약하면 영향이 제한적이라는 문장으로 채운다.",
             "- 환율 해석 원칙 (원가 관점 전용 — 매출·수출 채산성 언급 금지):",
@@ -1311,10 +1311,10 @@ export function renderEmail(data, opts = {}) {
   // 콘텐츠
   const newsWhyRows = (w, fallbackContent = "") => {
     const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : (w || {});
-    const row = (text, color) => `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="color:${color};font-weight:700;padding:0 3px 0 0">•</span>${esc(text)}</div>`;
-    return row(o.content || fallbackContent || "기사 요약 정보가 제한적이다.", T.text)
-      + row(o.opportunity || "당사에 유리하게 읽을 만한 단서는 아직 제한적이다.", T.brand)
-      + row(o.threat || "당장 부담으로 이어질 단서는 아직 제한적이다.", T.up);
+    const row = (text, color) => `<div style="margin-top:5px;padding-left:13px;text-indent:-13px;font-size:13px;color:${T.text};line-height:1.7"><span style="display:inline-block;width:13px;text-indent:0;color:${color};font-weight:700">•</span>${esc(text)}</div>`;
+    return row(o.content || fallbackContent || "기사 요약 정보 제한적", T.text)
+      + row(o.opportunity || "당사에 유리하게 읽을 단서는 제한적", T.brand)
+      + row(o.threat || "당장 부담으로 이어질 단서는 제한적", T.up);
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
@@ -1328,7 +1328,7 @@ export function renderEmail(data, opts = {}) {
         <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni], i.summary || "")}
-        <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
+        </td>${thumb}
         </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
