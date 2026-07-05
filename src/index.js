@@ -6,7 +6,7 @@
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED API(+R2 캐시 폴백)·R2 samsungda-research.
-// 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
+// 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 한 줄'(시장 동향과 그 의미를 연결한 1~2문장)
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
@@ -64,6 +64,7 @@ const T = {
 
 // 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
 const CHANGELOG = [
+  { d: "2026.07.06", t: "히어로를 '오늘의 맥락' → '오늘의 한 줄'로 개편 — 대응방안·손익영향 평가 대신 시장 동향과 그 의미를 1~2문장으로 압축" },
   { d: "2026.07.05", t: "'오늘의 맥락' AI 요약이 CI(경쟁사 전략 추적) 보드의 검증된 최근 동향을 실제로 참고하도록 연동" },
   { d: "2026.07.05", t: "추이 그래프 상단 헤드룸(기본 70%·우측 끝 최고점이면 65%) — 최신값이 최고점일 때 값 라벨이 그래프 위쪽에 앉도록" },
   { d: "2026.07.05", t: "추이 그래프: 유리 파랑·불리 빨강 단일색 + 세로 그라데이션 적용" },
@@ -454,7 +455,7 @@ async function gatherData(env) {
     getCiBoard(),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
-  const news = selectNews(newsPool, 5);  // 당사 기사 max 1 캡 + 비당사(경쟁사·소비자·기술) 우선
+  const news = selectNews(newsPool || []);
   await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports, ciBoard };
   data.signals = analyzeSignals(sigHist, data);
@@ -826,37 +827,26 @@ async function getNews() {
     const cut = Date.now() - DAY;
     const recent = items.filter(i => new Date(i.publishedAt).getTime() >= cut);
     const pool = recent.length ? recent : items;
-    return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 slice)
+    return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 selectNews로 선별)
   } catch { return []; }
 }
-// 당사(삼성) 단독 주제 기사 판별 — 가전 동향에서 자사 소식 과다 노출 억제용.
-// competitors에 삼성전자가 있거나 본문에 '삼성'이 등장하되, 경쟁사가 함께 다뤄지지 않은(비교·산업 기사가 아닌)
-// 순수 자사 소식만 true. 삼성·LG 동시 기사 등 산업/경쟁 성격은 false로 두어 그대로 노출한다.
-const RIVAL_KW = ["LG전자", "LG", "월풀", "Whirlpool", "Midea", "Haier", "하이얼", "BSH", "Bosch", "보쉬", "Electrolux", "일렉트로룩스", "Carrier", "Lennox", "Trane", "위닉스", "쿠쿠", "하이센스", "Hisense", "TCL"];
-function isOwnCompanyNews(it) {
-  const comp = it.competitors || [];
-  const hay = (it.headline || "") + " " + (it.summary || "");
-  const own = comp.includes("삼성전자") || hay.includes("삼성");
-  if (!own) return false;
-  const rival = comp.some(c => c !== "삼성전자") || RIVAL_KW.some(k => hay.includes(k));
-  return !rival;
+// 당사(삼성전자) 단독 주제 기사 판별 — 삼성·경쟁사 동시 등장 비교/산업 기사는 경쟁사 성격으로 보고 제외.
+function isOwnCompanyNews(n) {
+  const comps = n.competitors || [];
+  return comps.length === 1 && comps[0] === "삼성전자";
 }
-// 가전 동향 표시용 뉴스 선별 — grade·impact 정렬을 유지하되 당사(삼성) 단독기사는 최대 1건으로 캡.
-// 남는 자리는 다음 순위의 경쟁사·소비자·기술·정책 뉴스로 자연히 채워진다(비당사 우선).
-// 비당사 후보가 모자라면 캡 초과분(당사 기사)으로 백필해 표시 건수(limit)를 유지.
-function selectNews(pool, limit = 5) {
-  const out = [], overflow = [];
-  let own = 0;
-  for (const it of (pool || [])) {
+// 표시용 뉴스 선별: grade·impact 정렬된 풀에서 최대 limit건, 그중 당사(삼성) 단독기사는 최대 ownCap건만 채택.
+// 나머지 자리는 경쟁사·소비자·기술 등 비당사 기사로 자동 충당(정렬 순서 유지).
+function selectNews(pool, limit = 5, ownCap = 1) {
+  const out = [];
+  let ownCount = 0;
+  for (const n of pool) {
     if (out.length >= limit) break;
-    if (isOwnCompanyNews(it)) {
-      if (own >= 1) { overflow.push(it); continue; }
-      own++;
+    if (isOwnCompanyNews(n)) {
+      if (ownCount >= ownCap) continue;
+      ownCount++;
     }
-    out.push(it);
-  }
-  if (out.length < limit) {
-    for (const it of overflow) { if (out.length >= limit) break; out.push(it); }
+    out.push(n);
   }
   return out;
 }
@@ -1106,7 +1096,7 @@ async function aiSummary(env, data) {
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
             '{"hero":"...","consume":"...","cost":"...","newsSummary":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
             "- 해석 기준(최우선): hero·consume·cost의 방향과 의미는 6개월 추이를 1차 기준으로 삼는다. 시장지표(환율·유가·구리·철강·금리·홈빌더ETF·美CPI·기존주택)는 데이터에 '6개월' 델타가 병기돼 있으니 그 방향으로 큰 그림을 서술하고, '최근 전일/전월'은 단기 가속·되돌림을 짚을 때만 보조로 쓴다. 하루 등락으로 6개월 방향을 뒤집어 서술하지 않는다. 유럽·한국 CPI·소비심리·주간지표·운임(SCFI/FBX)은 발표주기 특성상 전년/전월/전주 델타를 그대로 쓴다.",
-            "- hero: '오늘의 맥락' — DA 기획팀 담당이 매일 아침 사업부장에게 올리는 브리핑이라 생각하고 쓴다. 소비·원가·주요뉴스에서 각각 핵심 인사이트를 하나씩 뽑아, 그것이 삼성 생활가전(DA) 사업에 어떤 영향을 주는지(수요·원가·손익·경쟁 구도)를 한 흐름으로 종합한다. 지표·요약을 되풀이하지 말고 '그래서 DA엔 무슨 의미인가'로 맺는다. 2~3문장·200자 이내로 간결하게, 방향은 6개월 추이를 1차 기준으로 잡고 핵심 근거 수치만 짧게 병기한다(예: '원/달러 6M +6%로 수입 원가 부담 누적'). 실행 지시가 아니라 사업부장이 판단할 맥락을 전달한다.",
+            "- hero: '오늘의 한 줄' — 오늘 소비·원가·가전 주요뉴스를 관통하는 '시장이 지금 어디로 움직이고 있고 그것이 무엇을 뜻하는가'를 1~2문장으로 압축한다. 개별 지표·뉴스를 나열하지 말고, 수요·원가·경쟁 구도의 큰 흐름과 그 시장적 의미를 한 문장 줄기로 엮는다. 초점은 당사 대응방안·손익영향 평가가 아니라 '시장 동향과 그 의미' 그 자체에 둔다 — 무엇을 하라는 실행·대응 지시는 담지 않는다. 방향은 6개월 추이를 1차 기준으로 잡고 핵심 근거 수치만 짧게 병기한다(예: '원/달러 6M +6%로 수입 원가 부담 누적'). 1~2문장·120자 내외로 간결하게.",
             "- consume: 소비 환경(CPI·금리·기존주택·홈빌더ETF·물가·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 美CPI·10Y·기존주택·홈빌더ETF는 6개월 추이 방향으로, 유럽·한국 CPI·심리는 발표주기 델타로 해석. 예: '인플레 둔화에도 고금리·주택 부진에 교체 수요 회복 지연 (美CPI 6M ▼0.5%p·10Y 6M +18bp·기존주택 6M ▼2.5%)'.",
             "  · 소비 방향은 시장 프록시의 6개월 추이(美CPI YoY·10Y·기존주택·홈빌더ETF ITB)를 우선 근거로 서술하고, 주간 지표(신규 실업수당청구·30Y 모기지 전주)로 보완한다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
@@ -1152,7 +1142,7 @@ async function aiSummary(env, data) {
           const legacy = typeof it.why === "string" ? it.why.trim().slice(0, 110) : "";
           if (content || opportunity || threat || legacy) newsWhy[it.idx] = { content: content || legacy, opportunity, threat };
         }
-        const hero = str(parsed.hero, 280);
+        const hero = str(parsed.hero, 180);
         if (hero) return {
           hero,
           sec: { consume: str(parsed.consume, 120) || rs.consume, cost: str(parsed.cost, 120) || rs.cost, news: str(parsed.newsSummary, 120) || rs.news },
@@ -1398,18 +1388,18 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
       <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
-      <div style="margin-top:10px;font-size:13px;color:${T.muted};letter-spacing:.05em">수요 시그널 · 원가 시그널 · 가전 산업 동향 · 기획 인사이트</div>
+      <div style="margin-top:10px;font-size:13px;color:${T.muted};letter-spacing:.05em">수요 시그널 · 원가 시그널 · 시장 동향 · 기획 인사이트</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
       <div style="background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${T.brand};padding:16px 18px">
-        <div style="font-size:13px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 맥락</div>
+        <div style="font-size:13px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 한 줄</div>
         <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
     </td></tr>
     ${sigStrip}
     ${section("🛒 수요 시그널", consumeTrend + consume, "", true, sm.sec.consume)}
     ${section("💰 원가 시그널", costTrend + cost, "", false, sm.sec.cost)}
-    ${section("📰 가전 산업 동향", newsRows, "", false, sm.sec.news)}
+    ${section("📰 시장 동향", newsRows, "", false, sm.sec.news)}
     ${section("🆕 기획 인사이트", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
