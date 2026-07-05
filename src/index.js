@@ -367,6 +367,7 @@ async function gatherData(env) {
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
   const news = (newsPool || []).slice(0, 5);
+  await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
   data.signals = analyzeSignals(sigHist, data);
   data.ciCand = buildCiCandidates(newsPool);
@@ -652,6 +653,26 @@ async function getNews() {
     const pool = recent.length ? recent : items;
     return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 slice)
   } catch { return []; }
+}
+
+// 기사 원문 og:image 추출 — 표시용 뉴스에만 사용. 실패 시 빈 문자열(무이미지 폴백).
+async function fetchOgImage(url) {
+  if (!url) return "";
+  try {
+    const res = await fetch(url, { headers: UA.headers, redirect: "follow", signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return "";
+    if (!(res.headers.get("content-type") || "").includes("text/html")) return "";
+    const html = (await res.text()).slice(0, 80000);
+    const pick = re => { const m = html.match(re); return m ? m[1].trim() : ""; };
+    let img =
+      pick(/<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]+content=["']([^"']+)["']/i) ||
+      pick(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url|:url)?["']/i) ||
+      pick(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i) ||
+      pick(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i);
+    if (!img) return "";
+    try { img = new URL(img.replace(/&amp;/g, "&"), url).href; } catch { return ""; }
+    return /^https:\/\//i.test(img) ? img : ""; // 이메일 클라이언트 https만 허용
+  } catch { return ""; }
 }
 async function getIdeas(env) {
   const items = [];
@@ -939,10 +960,15 @@ export function renderEmail(data, opts = {}) {
         const axBadges = (i.competitors || []).includes("LG전자")
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
-        return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
+        const thumb = i.image
+          ? `<td width="92" valign="top" style="padding:8px 0 8px 12px;width:92px"><a href="${esc(i.url)}" style="text-decoration:none"><img src="${esc(i.image)}" width="92" height="72" alt="" style="display:block;width:92px;height:72px;object-fit:cover;border:1px solid ${T.border};background:${T.bg}"></a></td>`
+          : "";
+        return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
+        <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`;
+        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
+        </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
