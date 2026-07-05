@@ -1223,8 +1223,8 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("🛒 소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
-    ${section("💰 원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
+    ${section("🛒 소비", consumeTrend + consume, "", true, sm.sec.consume)}
+    ${section("💰 원가", costTrend + cost, "", false, sm.sec.cost)}
     ${section("📰 가전 주요뉴스", newsRows, "", false, sm.sec.news)}
     ${section("🆕 New 아이디어/보고서", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
