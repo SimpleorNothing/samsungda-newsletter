@@ -1003,6 +1003,8 @@ export function renderEmail(data, opts = {}) {
   const mom = q => q ? chg(q.price, q.prevMonth) : "";   // 원가: 1개월전 대비(MoM)
   const dchg = q => q ? chg(q.price, q.prevDay) : "";     // 일간: 전일 대비
   const fmt = (n, d = 2) => n == null ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  // 추이 값 표기 규칙: |v|>=10 → 정수, 그 외 → 소수 1자리.
+  const fmtVal = v => v == null ? "—" : (Math.abs(v) >= 10 ? Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) : Number(v).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
   const line = html => `<div style="padding:4px 0;font-size:14px;color:${T.text};line-height:1.55">• ${html}</div>`;
   const lbl = t => `<span style="color:${T.muted}">${t}</span>`;
   const dot = ' <span style="color:' + T.border + '">·</span> ';
@@ -1046,7 +1048,7 @@ export function renderEmail(data, opts = {}) {
     };
     // 그라데이션: QuickChart 내장 헬퍼(v4 지원·확실히 렌더). 3-스톱으로 상단 진함→중간 옅음→바닥 완전 투명(TradingView풍).
     const json = JSON.stringify(c).replace('"__GRAD__"', `getGradientFillHelper('vertical', ['${rgba(lineCol, 0.42)}','${rgba(lineCol, 0.08)}','${rgba(lineCol, 0)}'])`);
-    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(json);
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=232&c=" + encodeURIComponent(json);
   };
   // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
   const ymLabel = s => { if (!s) return ""; const p = String(s).slice(0, 7).split("-"); return p.length < 2 ? "" : `'${p[0].slice(2)}.${parseInt(p[1], 10)}`; };
@@ -1067,21 +1069,21 @@ export function renderEmail(data, opts = {}) {
     const sp = qi && qi.spark;
     const ready = !!(sp && sp.length >= 4);
     const ax = ready ? { m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date) } : null;
-    // 끝점 세로 위치(%): 차트 400x332, 플롯영역 top=7·bottom=284.4(측정값), y축 min~max. 라벨은 점보다 살짝 위·플롯 안으로 clamp.
+    // 끝점 세로 위치(%): 차트 400x232, 플롯영역 top=7·bottom=184.4(측정값), y축 min~max. 라벨은 점보다 살짝 위·플롯 안으로 clamp.
     const lblTop = v => {
       const lo = Math.min(...sp), hi = Math.max(...sp), span = (hi - lo) || 1;
-      const yf = (7 + (hi - v) / span * (284.4 - 7)) / 332;
-      return (Math.max(0, Math.min(0.80, yf - 0.12)) * 100).toFixed(1);
+      const yf = (7 + (hi - v) / span * (184.4 - 7)) / 232;
+      return (Math.max(0, Math.min(0.78, yf - 0.14)) * 100).toFixed(1);
     };
     const lS = `position:absolute;font-size:12px;font-weight:700;color:${T.muted};font-variant-numeric:tabular-nums;background:rgba(255,255,255,.72);padding:0 2px;white-space:nowrap;line-height:1.2`;
     const url = qi ? sparkUrl(qi.spark, dirBase, good, ax) : "";
     const img = url
       ? `<div style="position:relative;width:100%;max-width:200px;margin:2px 0 4px">
-          <img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;height:auto">
+          <img src="${url}" width="400" height="232" alt="" style="display:block;width:100%;height:auto">
           <span style="${lS};top:${ready ? lblTop(sp[0]) : "0"}%;left:2%">${ready ? fvt(sp[0]) : ""}</span>
           <span style="${lS};top:${ready ? lblTop(sp[sp.length - 1]) : "0"}%;right:2%">${ready ? fvt(sp[sp.length - 1]) : ""}</span>
         </div>`
-      : `<div style="height:150px;margin:2px 0 4px"></div>`;
+      : `<div style="height:105px;margin:2px 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
@@ -1106,21 +1108,21 @@ export function renderEmail(data, opts = {}) {
   const scfiT = (s && s.scfi && s.scfi.trend) || null;
   const scfiPx = (s && s.scfi && s.scfi.value != null) ? s.scfi.value : null;
   const consumeTrend = trendStrip([
-    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp", fvt: v => `${fmt(v, 1)}%` }),
-    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fvt: v => `${fmt(v)}%` }),
-    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true, fvt: v => `${fmt(v / 1e6, 2)}M` }),
+    trendCell("美 CPI (YoY)", `${fmtVal(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null))}${uPct}`, cpiT, { delta: "pp", fvt: v => `${fmtVal(v)}%` }),
+    trendCell("美 10Y 금리", `${fmtVal(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fvt: v => `${fmtVal(v)}%` }),
+    trendCell("기존주택 거래", `${fmtVal(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null))}${uM}`, exhT, { good: true, fvt: v => `${fmtVal(v / 1e6)}M` }),
   ].join(""));
   const scfiCell = scfiT
-    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT, { fvt: v => `${fmt(v, 0)}p` })
+    ? trendCell("SCFI 운임", `${fmtVal(scfiPx)}${uP}`, scfiT, { fvt: v => `${fmtVal(v)}p` })
     : `<td width="33%" style="padding:16px 10px;vertical-align:top">
         <div style="font-size:13px;color:${T.muted};font-weight:600">SCFI 운임</div>
         <div style="height:84px;margin:8px 0 6px"></div>
-        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmt(scfiPx, 0) + uP : "—"}</div>
+        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmtVal(scfiPx) + uP : "—"}</div>
         <div style="font-size:13px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
       </td>`;
   const costTrend = trendStrip([
-    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fvt: v => `$${fmt(v)}` }),
-    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT, { fvt: v => fmt(v, 1) }),
+    trendCell("WTI 유가", `$${fmtVal(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fvt: v => `$${fmtVal(v)}` }),
+    trendCell("철강 (PPI)", `${fmtVal(steelT ? steelT.price : (m.steel ? m.steel.val : null))}`, steelT, { fvt: v => `${fmtVal(v)}` }),
     scfiCell,
   ].join(""));
 
