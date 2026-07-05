@@ -1163,11 +1163,18 @@ export function renderEmail(data, opts = {}) {
   ].join("");
 
   // 콘텐츠
+  // 뉴스별 내용 — 기사 자체 요약(summary)을 항상 노출. 최대 160자 클립.
+  const newsContentRow = txt => {
+    if (!txt) return "";
+    const s = String(txt);
+    const clipped = s.length > 160 ? s.slice(0, 160).replace(/\s+\S*$/, "") + "…" : s;
+    return `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7">${esc(clipped)}</div>`;
+  };
+  // 당사(DA) 관점 기회·위협(AI 생성분이 있을 때만). 내용은 위 요약으로 대체.
   const newsWhyRows = w => {
-    if (!w) return "";
-    const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : w;
+    if (!w || typeof w === "string") return "";
     const row = (text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="color:${color};font-weight:700;padding:0 3px 0 0">•</span>${esc(text)}</div>` : "";
-    return row(o.content, T.text) + row(o.opportunity, T.brand) + row(o.threat, T.up);
+    return row(w.opportunity, T.brand) + row(w.threat, T.up);
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
@@ -1180,6 +1187,7 @@ export function renderEmail(data, opts = {}) {
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
+        ${newsContentRow(i.summary)}
         ${newsWhyRows(sm.newsWhy[ni])}
         <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
         </tr></table>`;
