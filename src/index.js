@@ -2,7 +2,7 @@
 //
 // 콘텐츠: [원가] 그래프 유가WTI·철강PPI·운임SCFI(6개월 추이) + 원자재 구리/레진·환율 원/페소/바트
 //         [소비] 그래프 美CPI(YoY)·美10Y·기존주택거래(6개월 추이) + 물가 유럽/한국CPI·수요 홈빌더ITB·소비심리 UMich
-//         · 운임 SCFI/FBX(주간, web_search 자동 캐시 + R2 override), 그래프 아래 추가지표는 성격 라벨 우선 최대 3줄
+//         · 운임 SCFI/FBX(web_search 일 1회 자동 캐시 + R2 override), SCFI 6개월 추이는 엑셀 seed + 누적 관측치, 그래프 아래 추가지표는 성격 라벨 우선 최대 3줄
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED API(+R2 캐시 폴백)·R2 samsungda-research.
@@ -13,12 +13,15 @@
 // 인사이트: [누적신호] R2 signals/history.json 일별 스냅샷 축적 → 주간 델타·연속 스트릭·수요 분화(ITB↔XLY) 임계 감지. preview는 읽기전용, 실발송/cron만 기록.
 //           [CI라우팅] MI뉴스 → LG 전략축(A1~A6) 키워드 매칭 → LG 관련건 축 뱃지 + signals/ci-candidates.json 스테이징(사람 검토용, evidence.json 자동커밋 없음).
 
+import { SCFI_SEED } from "./scfi-seed.js";
+
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
-const FBX_KEY = "signals/fbx.json";  // 운임지수 캐시(SCFI 종합·FBX Global) — web_search 주간 자동 갱신 + 수동 override
+const FBX_KEY = "signals/fbx.json";  // 운임지수 캐시(SCFI 종합·FBX Global) — web_search 일 1회 자동 갱신 + 수동 override
 const SIG_KEY = "signals/history.json";        // 일별 지표 스냅샷 누적(최대 90일) — 누적 신호 감지용
+const SCFI_HIST_KEY = "signals/scfi-history.json"; // SCFI 종합지수 주간 관측 누적(seed 이후 web_search 갱신분) — 6개월 추이용
 const CI_CAND_KEY = "signals/ci-candidates.json"; // LG 전략축 관련 뉴스 스테이징(CI 센싱 inbox 후보, 사람 검토)
 const FRED_CACHE_PREFIX = "signals/fred/"; // FRED 공식 API 성공 응답 캐시(일시 실패 시 직전 성공값 사용)
 const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
@@ -125,6 +128,45 @@ async function persistSignals(env, data) {
     if (hist.length > 90) hist = hist.slice(hist.length - 90);
     await env.RESEARCH.put(SIG_KEY, JSON.stringify(hist), { httpMetadata: { contentType: "application/json" } });
   } catch { /* 무시 */ }
+}
+// ---------- SCFI 6개월 추이(엑셀 seed + web_search 누적) ----------
+// R2 누적 SCFI 관측치 로드 — [{date,value}] (seed 이후 web_search 갱신분). 실패 시 빈 배열.
+async function loadScfiHistory(env) {
+  if (!env.RESEARCH) return [];
+  try { const o = await env.RESEARCH.get(SCFI_HIST_KEY); if (o) { const a = await o.json(); return Array.isArray(a) ? a : []; } } catch { /* 무시 */ }
+  return [];
+}
+// web_search로 얻은 SCFI 최신치를 발표일(asof) 기준으로 R2 누적에 upsert. 같은 날짜는 갱신(재실행 안전).
+async function persistScfiObservation(env, scfi) {
+  if (!env.RESEARCH || !scfi || scfi.value == null || !isFinite(scfi.value)) return;
+  const date = (typeof scfi.asof === "string" && scfi.asof) ? scfi.asof.slice(0, 10) : kstDate();
+  try {
+    let hist = await loadScfiHistory(env);
+    hist = hist.filter(x => x.date !== date);
+    hist.push({ date, value: Number(scfi.value) });
+    hist.sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (hist.length > 520) hist = hist.slice(hist.length - 520);  // ≈10년치 주간 상한
+    await env.RESEARCH.put(SCFI_HIST_KEY, JSON.stringify(hist), { httpMetadata: { contentType: "application/json" } });
+  } catch { /* 무시 */ }
+}
+// seed + 누적 + 오늘 관측치를 날짜로 병합 → 최근 6개월(183일) 구간의 주간 추이셀 {price,first6m,spark}.
+function scfiTrend(hist, live) {
+  const byDate = new Map();
+  for (const p of SCFI_SEED) if (p && p.value != null) byDate.set(p.date, Number(p.value));
+  for (const p of (hist || [])) if (p && p.date && p.value != null) byDate.set(p.date, Number(p.value));
+  if (live && live.value != null && isFinite(live.value)) {
+    const d = (typeof live.asof === "string" && live.asof) ? live.asof.slice(0, 10) : kstDate();
+    byDate.set(d, Number(live.value));
+  }
+  const dates = [...byDate.keys()].filter(d => byDate.get(d) != null && isFinite(byDate.get(d))).sort();
+  if (dates.length < 4) return null;
+  const price = byDate.get(dates[dates.length - 1]);
+  const cutMs = new Date(dates[dates.length - 1] + "T00:00:00Z").getTime() - 183 * 86400000;  // ≈6개월 전
+  let first6m = byDate.get(dates[0]);
+  for (const d of dates) { if (new Date(d + "T00:00:00Z").getTime() <= cutMs) first6m = byDate.get(d); else break; }
+  const recent = dates.filter(d => new Date(d + "T00:00:00Z").getTime() >= cutMs).map(d => byDate.get(d));
+  const sparkSrc = recent.length >= 4 ? recent : dates.slice(-26).map(d => byDate.get(d));
+  return { price, first6m, spark: downsample(sparkSrc, 26).map(v => Number(v.toPrecision(4))) };
 }
 // 축적분 대비 주간 누적 델타 + 연속 스트릭 → 임계 돌파 신호. 데이터 얕으면 조용히 비활성.
 function analyzeSignals(history, data) {
@@ -372,7 +414,7 @@ async function run(env, { send }) {
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
   const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
-  const [yq, macro, freight, newsPool, ideas, reports, sigHist] = await Promise.all([
+  const [yq, macro, freight, newsPool, ideas, reports, sigHist, scfiHist] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
     getMacro(env),
     getFreight(env),
@@ -380,17 +422,16 @@ async function gatherData(env) {
     getIdeas(env),
     getReports(env),
     loadSignalHistory(env),
+    loadScfiHistory(env),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
   const news = (newsPool || []).slice(0, 5);
   await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
   data.signals = analyzeSignals(sigHist, data);
-  // SCFI 6개월 추이: 누적 스냅샷(history)의 scfi 시계열 + 오늘치 → 추이셀. 데이터 얕으면 null(자리표시자).
+  // SCFI 6개월 추이: 엑셀 seed + R2 누적(web_search 갱신분) + 오늘 관측치를 날짜로 병합 → 추이셀.
   if (data.freight && data.freight.scfi) {
-    const scfiVals = (sigHist || []).filter(x => x.scfi != null).map(x => x.scfi);
-    if (data.freight.scfi.value != null) scfiVals.push(data.freight.scfi.value);
-    data.freight.scfi.trend = seriesTrend(scfiVals);
+    data.freight.scfi.trend = scfiTrend(scfiHist, data.freight.scfi);
   }
   data.ciCand = buildCiCandidates(newsPool);
   data.summary = await aiSummary(env, data);
@@ -692,15 +733,20 @@ function isoWeek(d) {
   const wk = Math.ceil((((dt - yStart) / 86400000) + 1) / 7);
   return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
 }
-// 이번 주 캐시가 이미 web_search로 갱신됐으면 skip. 아니면 Claude API+web_search로 SCFI/FBX 최신치 조회 → R2 캐시.
+// 오늘 캐시가 이미 web_search로 갱신됐으면 skip. 아니면 Claude API+web_search로 SCFI/FBX 최신치 조회 → R2 캐시.
+// SCFI는 주간 발표지만 매일 1회 확인하여 새 발표치를 당일 반영(scfi-history는 발표일 기준 upsert라 재확인은 무해).
 // cron·발송 경로에서 자동 갱신하고, /refresh-freight 또는 /preview?refresh=freight&key=... 에서 보호된 수동 갱신 가능.
 async function refreshFreight(env, opts = {}) {
   if (!env.RESEARCH || !env.ANTHROPIC_API_KEY) return;
   const wk = isoWeek(new Date());
-  try { const cur = await getFreightRaw(env); if (!opts.force && cur && cur.source === "web_search" && cur.week === wk) return; } catch { /* 계속 진행 */ }
+  const day = kstDate();
+  try { const cur = await getFreightRaw(env); if (!opts.force && cur && cur.source === "web_search" && cur.day === day) return; } catch { /* 계속 진행 */ }
   try {
     const f = await fetchFreightViaSearch(env);
-    if (f) await env.RESEARCH.put(FBX_KEY, JSON.stringify({ ...f, source: "web_search", week: wk, updatedAt: Date.now() }), { httpMetadata: { contentType: "application/json" } });
+    if (f) {
+      await env.RESEARCH.put(FBX_KEY, JSON.stringify({ ...f, source: "web_search", week: wk, day, updatedAt: Date.now() }), { httpMetadata: { contentType: "application/json" } });
+      await persistScfiObservation(env, f.scfi);  // 발표일 기준 SCFI 누적 → 6개월 추이 시드에 이어붙임
+    }
   } catch { /* 조회 실패 시 기존 캐시 유지 */ }
 }
 async function fetchFreightViaSearch(env) {
@@ -1117,7 +1163,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
-    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 주간 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 누적 축적분 기준.
+    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 일 1회 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 엑셀 seed + 누적 관측치 기준.
   </div>
 </td></tr>
 </table>
