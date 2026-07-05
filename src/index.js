@@ -6,7 +6,7 @@
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED API(+R2 캐시 폴백)·R2 samsungda-research.
-// 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
+// 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 한 줄'(시장 동향과 그 의미를 연결한 1~2문장)
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
@@ -64,6 +64,7 @@ const T = {
 
 // 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
 const CHANGELOG = [
+  { d: "2026.07.06", t: "히어로를 '오늘의 맥락' → '오늘의 한 줄'로 개편 — 대응방안·손익영향 평가 대신 시장 동향과 그 의미를 1~2문장으로 압축" },
   { d: "2026.07.05", t: "'오늘의 맥락' AI 요약이 CI(경쟁사 전략 추적) 보드의 검증된 최근 동향을 실제로 참고하도록 연동" },
   { d: "2026.07.05", t: "추이 그래프 상단 헤드룸(기본 70%·우측 끝 최고점이면 65%) — 최신값이 최고점일 때 값 라벨이 그래프 위쪽에 앉도록" },
   { d: "2026.07.05", t: "추이 그래프: 유리 파랑·불리 빨강 단일색 + 세로 그라데이션 적용" },
@@ -1075,7 +1076,7 @@ async function aiSummary(env, data) {
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
             '{"hero":"...","consume":"...","cost":"...","newsSummary":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
             "- 해석 기준(최우선): hero·consume·cost의 방향과 의미는 6개월 추이를 1차 기준으로 삼는다. 시장지표(환율·유가·구리·철강·금리·홈빌더ETF·美CPI·기존주택)는 데이터에 '6개월' 델타가 병기돼 있으니 그 방향으로 큰 그림을 서술하고, '최근 전일/전월'은 단기 가속·되돌림을 짚을 때만 보조로 쓴다. 하루 등락으로 6개월 방향을 뒤집어 서술하지 않는다. 유럽·한국 CPI·소비심리·주간지표·운임(SCFI/FBX)은 발표주기 특성상 전년/전월/전주 델타를 그대로 쓴다.",
-            "- hero: '오늘의 맥락' — DA 기획팀 담당이 매일 아침 사업부장에게 올리는 브리핑이라 생각하고 쓴다. 소비·원가·주요뉴스에서 각각 핵심 인사이트를 하나씩 뽑아, 그것이 삼성 생활가전(DA) 사업에 어떤 영향을 주는지(수요·원가·손익·경쟁 구도)를 한 흐름으로 종합한다. 지표·요약을 되풀이하지 말고 '그래서 DA엔 무슨 의미인가'로 맺는다. 2~3문장·200자 이내로 간결하게, 방향은 6개월 추이를 1차 기준으로 잡고 핵심 근거 수치만 짧게 병기한다(예: '원/달러 6M +6%로 수입 원가 부담 누적'). 실행 지시가 아니라 사업부장이 판단할 맥락을 전달한다.",
+            "- hero: '오늘의 한 줄' — 오늘 소비·원가·가전 주요뉴스를 관통하는 '시장이 지금 어디로 움직이고 있고 그것이 무엇을 뜻하는가'를 1~2문장으로 압축한다. 개별 지표·뉴스를 나열하지 말고, 수요·원가·경쟁 구도의 큰 흐름과 그 시장적 의미를 한 문장 줄기로 엮는다. 초점은 당사 대응방안·손익영향 평가가 아니라 '시장 동향과 그 의미' 그 자체에 둔다 — 무엇을 하라는 실행·대응 지시는 담지 않는다. 방향은 6개월 추이를 1차 기준으로 잡고 핵심 근거 수치만 짧게 병기한다(예: '원/달러 6M +6%로 수입 원가 부담 누적'). 1~2문장·120자 내외로 간결하게.",
             "- consume: 소비 환경(CPI·금리·기존주택·홈빌더ETF·물가·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 美CPI·10Y·기존주택·홈빌더ETF는 6개월 추이 방향으로, 유럽·한국 CPI·심리는 발표주기 델타로 해석. 예: '인플레 둔화에도 고금리·주택 부진에 교체 수요 회복 지연 (美CPI 6M ▼0.5%p·10Y 6M +18bp·기존주택 6M ▼2.5%)'.",
             "  · 소비 방향은 시장 프록시의 6개월 추이(美CPI YoY·10Y·기존주택·홈빌더ETF ITB)를 우선 근거로 서술하고, 주간 지표(신규 실업수당청구·30Y 모기지 전주)로 보완한다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
@@ -1121,7 +1122,7 @@ async function aiSummary(env, data) {
           const legacy = typeof it.why === "string" ? it.why.trim().slice(0, 110) : "";
           if (content || opportunity || threat || legacy) newsWhy[it.idx] = { content: content || legacy, opportunity, threat };
         }
-        const hero = str(parsed.hero, 280);
+        const hero = str(parsed.hero, 180);
         if (hero) return {
           hero,
           sec: { consume: str(parsed.consume, 120) || rs.consume, cost: str(parsed.cost, 120) || rs.cost, news: str(parsed.newsSummary, 120) || rs.news },
@@ -1371,7 +1372,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
       <div style="background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${T.brand};padding:16px 18px">
-        <div style="font-size:13px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 맥락</div>
+        <div style="font-size:13px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 한 줄</div>
         <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
     </td></tr>
