@@ -1171,6 +1171,9 @@ export function renderEmail(data, opts = {}) {
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
+        const itemSummary = i.summary
+          ? `<div style="margin-top:5px;font-size:13px;color:${T.muted};line-height:1.65">${esc(i.summary)}</div>`
+          : "";
         const axBadges = (i.competitors || []).includes("LG전자")
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:13px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
@@ -1180,6 +1183,7 @@ export function renderEmail(data, opts = {}) {
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
+        ${itemSummary}
         ${newsWhyRows(sm.newsWhy[ni])}
         <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
         </tr></table>`;
