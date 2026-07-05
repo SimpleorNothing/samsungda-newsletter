@@ -1,0 +1,32 @@
+name: Deploy Worker
+
+# main에 코드·설정이 머지되면 Cloudflare Workers로 자동 배포한다.
+# (README 등 비관련 변경은 paths 필터로 배포를 트리거하지 않는다.)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}   # 수동 실행(Actions 탭 → Run workflow)도 허용
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: deploy
