@@ -912,6 +912,88 @@ function summaryContext(data) {
     : "없음";
   return `[지표 (해석은 6개월 추이 기준 — 시장지표에 6개월 델타 병기, 최근 전일/전월은 단기 보조; 물가·심리·주간·운임은 발표주기 델타)]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[LG 전략축(A1~A6) 관련 뉴스]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
 }
+// 규칙 기반 섹션 인사이트 — AI 요약이 없거나 공란일 때도 소비·원가·뉴스에 항상 해석 한 줄을 채운다.
+// 6개월 추이 방향을 1차 기준으로, spark(6개월 시리즈)에서 고점·저점 대비 위치를 읽어 되돌림 뉘앙스까지 포착.
+function sectionInsights(data) {
+  const q = data.q || {}, m = data.macro || {}, s = data.freight || {};
+  const sp = (v, d = 1) => `${v >= 0 ? "\u25B2" : "\u25BC"}${Math.abs(v).toFixed(d)}%`;
+  // obj{price,first6m,spark} → {net6, fromPeak(≤0), fromTrough(≥0)}
+  const pk = obj => {
+    if (!obj || obj.first6m == null || !obj.first6m || obj.price == null) return null;
+    const net6 = (obj.price / obj.first6m - 1) * 100;
+    let fromPeak = null, fromTrough = null;
+    const a = Array.isArray(obj.spark) ? obj.spark.filter(v => typeof v === "number") : null;
+    if (a && a.length >= 3) {
+      const hi = Math.max(...a), lo = Math.min(...a);
+      if (hi) fromPeak = (obj.price / hi - 1) * 100;
+      if (lo) fromTrough = (obj.price / lo - 1) * 100;
+    }
+    return { net6, fromPeak, fromTrough };
+  };
+
+  // ── 원가: 유가·철강·SCFI·원/달러 6개월 방향 + 유가 고점대비 되돌림 ──
+  const wti = pk(q["CL=F"]), steel = pk(m.steel && m.steel.trend), scfi = pk(s.scfi && s.scfi.trend), krw = pk(q["KRW=X"]);
+  const costEv = [];
+  if (wti) costEv.push(`WTI 6M ${sp(wti.net6)}`);
+  if (steel) costEv.push(`철강 6M ${sp(steel.net6)}`);
+  if (scfi) costEv.push(`SCFI 6M ${sp(scfi.net6)}`);
+  else if (s.scfi && s.scfi.value != null && s.scfi.wow != null) costEv.push(`SCFI 전주 ${sp(s.scfi.wow)}`);
+  if (krw) costEv.push(`원/달러 6M ${sp(krw.net6)}`);
+  const upCnt = [wti, steel, scfi].filter(x => x && x.net6 > 0).length + (krw && krw.net6 > 0 ? 1 : 0);
+  let cost;
+  if (!costEv.length) cost = "원가 지표 수집 지연으로 추이 판독 보류";
+  else {
+    const lead = upCnt >= 2
+      ? "유가·철강·운임 등 주요 원가가 6개월 전보다 높아 원가 부담이 누적된 국면"
+      : "주요 원가 지표가 6개월 기준 진정돼 원가 압력은 다소 완화된 국면";
+    let nu = "";
+    if (wti && wti.net6 > 0 && wti.fromPeak != null && wti.fromPeak <= -3)
+      nu += `. 다만 유가는 최근 고점 대비 ${sp(wti.fromPeak)}로 되돌아와 단기 압력은 진정되는 흐름`;
+    else if (wti && wti.net6 > 0 && wti.fromPeak != null && wti.fromPeak > -1.5)
+      nu += ". 유가는 고점권에 근접해 추가 상방 시 원가 부담 확대 소지";
+    if (krw && krw.net6 > 0) nu += `${nu ? ". 아울러 " : ". "}원/달러 약세는 수입 부품·원자재 원화환산 원가의 상방 요인`;
+    cost = `${lead}${nu} (${costEv.join("·")})`;
+  }
+
+  // ── 소비: 인플레·금리·주택·홈빌더·심리 → 가전 수요 여건 ──
+  const cpiTr = m.cpiUS && m.cpiUS.trend;
+  const cpiPP = (cpiTr && cpiTr.first6m != null) ? (cpiTr.price - cpiTr.first6m) : null;
+  const tnx = q["^TNX"];
+  const bp6 = (tnx && tnx.first6m != null) ? Math.round((tnx.price - tnx.first6m) * 100) : null;
+  const exh = pk(m.exhome && m.exhome.trend), itb = pk(q["ITB"]);
+  const conEv = [];
+  if (cpiPP != null) conEv.push(`美CPI 6M ${cpiPP >= 0 ? "+" : ""}${cpiPP.toFixed(1)}%p`);
+  if (bp6 != null) conEv.push(`10Y 6M ${bp6 >= 0 ? "+" : ""}${bp6}bp`);
+  if (exh) conEv.push(`기존주택 6M ${sp(exh.net6)}`);
+  if (itb) conEv.push(`ITB 6M ${sp(itb.net6)}`);
+  if (m.umich) conEv.push(`소비심리 ${m.umich.val.toFixed(0)}`);
+  let consume;
+  if (!conEv.length) consume = "소비 지표 수집 지연으로 추이 판독 보류";
+  else {
+    const inflEase = cpiPP != null && cpiPP < 0;
+    const rateHigh = bp6 != null && bp6 > 0;
+    const houseWeak = exh && exh.net6 < 0;
+    const lead = (rateHigh || houseWeak)
+      ? `${inflEase ? "인플레는 둔화됐으나 " : ""}고금리·주택거래 부진으로 가전 교체·이사 수요의 회복이 지연되는 국면`
+      : `${inflEase ? "인플레 둔화와 함께 " : ""}금리·주택 여건이 완만해지며 가전 수요 여건은 점진 개선 방향`;
+    const tail = (itb && itb.net6 > 0) ? ". 홈빌더 지수 반등은 신축·빌트인 수요 개선 신호로 상방 여지" : "";
+    consume = `${lead}${tail} (${conEv.join("·")})`;
+  }
+
+  // ── 가전뉴스: 종합 구도(구조적 요약) ──
+  const nv = data.news || [];
+  let news = "";
+  if (nv.length) {
+    const comp = [...new Set(nv.flatMap(n => n.competitors || []))].slice(0, 3);
+    const lc = {}; nv.forEach(n => { if (n.lens) lc[n.lens] = (lc[n.lens] || 0) + 1; });
+    const dom = Object.entries(lc).sort((a, b) => b[1] - a[1])[0];
+    const top = nv[0];
+    news = `가전뉴스 ${nv.length}건${top && top.headline ? ` — \u300C${top.headline}\u300D 등` : ""}${comp.length ? ` ${comp.join("·")} 동향 중심` : ""}${dom ? `, ${dom[0]} 신호 비중이 큼` : ""}`;
+  }
+
+  return { consume, cost, news };
+}
+
 function ruleSummary(data) {
   const q = data.q, seg = [];
   const add = (nm, v) => { if (v != null) seg.push(`${nm} ${v >= 0 ? "▲" : "▼"}${Math.abs(v).toFixed(1)}%`); };
@@ -922,7 +1004,7 @@ function ruleSummary(data) {
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 6개월 추이 기준 원가·소비 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
-  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "", news: "" }, newsWhy: {} };
+  return { hero: `${macro}. ${news}`, sec: sectionInsights(data), newsWhy: {} };
 }
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
@@ -948,6 +1030,7 @@ async function aiSummary(env, data) {
             "  · 소비 방향은 시장 프록시의 6개월 추이(美CPI YoY·10Y·기존주택·홈빌더ETF ITB)를 우선 근거로 서술하고, 주간 지표(신규 실업수당청구·30Y 모기지 전주)로 보완한다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
             "- cost: 원가 환경(유가·철강·원자재·환율·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 유가·철강·구리·환율은 6개월 추이 방향으로 해석하고 괄호에 6개월 델타 병기(예: 'WTI 6M +18%·철강 6M +6%·원/달러 6M +6%'). 운임은 발표주기 특성상 SCFI/FBX 전주比로 서술 — SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임.",
+            "  · 유가·철강 등 원가가 6개월 기준 상승했더라도 최근 고점 대비 되돌아왔다면 '6개월 높지만 고점 대비 진정' 식으로 국면(상승 지속 vs 고점 후 조정)을 구분해 서술한다.",
             "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
@@ -975,6 +1058,7 @@ async function aiSummary(env, data) {
         const t = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
         const raw = t.replace(/```json|```/g, "").trim();
         const parsed = JSON.parse(raw);
+        const rs = sectionInsights(data);
         const str = (v, n) => typeof v === "string" ? v.trim().slice(0, n) : "";
         const newsWhy = {};
         for (const it of (Array.isArray(parsed.news) ? parsed.news : [])) {
@@ -988,7 +1072,7 @@ async function aiSummary(env, data) {
         const hero = str(parsed.hero, 280);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120), news: str(parsed.newsSummary, 120) },
+          sec: { consume: str(parsed.consume, 120) || rs.consume, cost: str(parsed.cost, 120) || rs.cost, news: str(parsed.newsSummary, 120) || rs.news },
           newsWhy,
         };
       }
