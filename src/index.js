@@ -1,7 +1,8 @@
 // samsungda-newsletter — 기획 데일리 (Cloudflare Worker + Cron)
 //
-// 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재(전월)·운임 SCFI·FBX(주간, web_search 자동 캐시 + R2 override)
-//         [소비] 금리 美10Y(전일)·수요 홈빌더ITB/소비재XLY(전일)·주간 실업수당청구/30Y모기지(전주)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
+// 콘텐츠: [원가] 그래프 유가WTI·철강PPI·운임SCFI(6개월 추이) + 원자재 구리/레진·환율 원/페소/바트
+//         [소비] 그래프 美CPI(YoY)·美10Y·기존주택거래(6개월 추이) + 물가 유럽/한국CPI·수요 홈빌더ITB·소비심리 UMich
+//         · 운임 SCFI/FBX(주간, web_search 자동 캐시 + R2 override), 그래프 아래 추가지표는 성격 라벨 우선 최대 3줄
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
 // 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED CSV(무키 월간지표)·R2 samsungda-research.
@@ -31,8 +32,9 @@ const CORS = {
 
 // FRED 시리즈
 const FRED = {
-  cpiUS: "CPIAUCSL", pce: "PCEPI", cpiKR: "KORCPIALLMINMEI",
+  cpiUS: "CPIAUCSL", pce: "PCEPI", cpiKR: "KORCPIALLMINMEI", cpiEU: "CP0000EZ19M086NEST",
   houst: "HOUST", exhome: "EXHOSLUSM495S", umich: "UMCSENT", ironore: "PIORECRUSDM",
+  steel: "WPU101", resin: "PCU325211325211",
 };
 // FRED 주간 시리즈 (전주 대비 델타로 매일-근접 신선분 확보)
 const FRED_WEEKLY = {
@@ -369,6 +371,12 @@ async function gatherData(env) {
   const news = (newsPool || []).slice(0, 5);
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
   data.signals = analyzeSignals(sigHist, data);
+  // SCFI 6개월 추이: 누적 스냅샷(history)의 scfi 시계열 + 오늘치 → 추이셀. 데이터 얕으면 null(자리표시자).
+  if (data.freight && data.freight.scfi) {
+    const scfiVals = (sigHist || []).filter(x => x.scfi != null).map(x => x.scfi);
+    if (data.freight.scfi.value != null) scfiVals.push(data.freight.scfi.value);
+    data.freight.scfi.trend = seriesTrend(scfiVals);
+  }
   data.ciCand = buildCiCandidates(newsPool);
   data.summary = await aiSummary(env, data);
   return data;
@@ -570,14 +578,35 @@ function fredStat(rows) {
     yoy: n >= 13 ? (last.v / rows[n - 13].v - 1) * 100 : null,
   };
 }
+// 값 시계열 → 추이셀 {price,first6m,spark}. 월간 시계열은 first6m를 7번째-뒤(≈6개월 전)로.
+function seriesTrend(vals) {
+  const pts = (vals || []).filter(v => v != null && isFinite(v));
+  if (pts.length < 4) return null;
+  const price = pts[pts.length - 1];
+  const first6m = pts.length >= 7 ? pts[pts.length - 7] : pts[0];
+  return { price, first6m, spark: downsample(pts, 26).map(v => Number(v.toPrecision(4))) };
+}
+// FRED rows → 추이셀. yoy=true면 전년비(%) 시계열로 변환(레벨이 단조증가하는 CPI용).
+function fredTrend(rows, yoy) {
+  if (!rows || rows.length < 4) return null;
+  let vals;
+  if (yoy) { vals = []; for (let i = 12; i < rows.length; i++) vals.push((rows[i].v / rows[i - 12].v - 1) * 100); }
+  else vals = rows.map(r => r.v);
+  return seriesTrend(vals);
+}
 async function getMacro() {
   const mIds = Object.values(FRED), wIds = Object.values(FRED_WEEKLY);
   const [mRows, wRows] = await Promise.all([
-    Promise.all(mIds.map(id => fred(id))),
-    Promise.all(wIds.map(id => fred(id, 3))),  // 주간: 최근 3개월이면 전주 델타 확보
+    Promise.all(mIds.map(id => fred(id, 30))),  // 월간: 30개월이면 CPI 전년비 6개월 추이 시계열 확보
+    Promise.all(wIds.map(id => fred(id, 3))),   // 주간: 최근 3개월이면 전주 델타 확보
   ]);
-  const s = {}; Object.keys(FRED).forEach((k, i) => s[k] = fredStat(mRows[i]));
+  const s = {}, rowsByKey = {};
+  Object.keys(FRED).forEach((k, i) => { s[k] = fredStat(mRows[i]); rowsByKey[k] = mRows[i]; });
   Object.keys(FRED_WEEKLY).forEach((k, i) => s[k] = fredStat(wRows[i]));  // mom = 전주比
+  // 차트용 6개월 추이 시계열 부착: 美CPI(전년비)·기존주택(레벨)·철강(레벨)
+  if (s.cpiUS) s.cpiUS.trend = fredTrend(rowsByKey.cpiUS, true);
+  if (s.exhome) s.exhome.trend = fredTrend(rowsByKey.exhome, false);
+  if (s.steel) s.steel.trend = fredTrend(rowsByKey.steel, false);
   return s;
 }
 async function getFreightRaw(env) {
@@ -689,25 +718,32 @@ const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 10
 function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
 function summaryContext(data) {
   const q = data.q, m = data.macro, s = data.freight, L = [];
-  if (q["KRW=X"]) L.push(`원/달러 ${q["KRW=X"].price.toFixed(1)} (전일 ${sPct(pctOf(q["KRW=X"].price, q["KRW=X"].prevDay))})`);
-  if (q["MXN=X"]) L.push(`페소 ${q["MXN=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["MXN=X"].price, q["MXN=X"].prevDay))})`);
-  if (q["THB=X"]) L.push(`바트 ${q["THB=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["THB=X"].price, q["THB=X"].prevDay))})`);
-  if (q["VND=X"]) L.push(`동 ${q["VND=X"].price.toFixed(0)} (전일 ${sPct(pctOf(q["VND=X"].price, q["VND=X"].prevDay))})`);
-  if (q["INR=X"]) L.push(`루피 ${q["INR=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["INR=X"].price, q["INR=X"].prevDay))})`);
-  if (q["PLN=X"]) L.push(`즈워티 ${q["PLN=X"].price.toFixed(2)} (전일 ${sPct(pctOf(q["PLN=X"].price, q["PLN=X"].prevDay))})`);
-  if (q["CL=F"]) L.push(`WTI ${q["CL=F"].price.toFixed(1)} (전일 ${sPct(pctOf(q["CL=F"].price, q["CL=F"].prevDay))})`);
-  if (q["HG=F"]) L.push(`구리 ${q["HG=F"].price.toFixed(2)} (전월 ${sPct(pctOf(q["HG=F"].price, q["HG=F"].prevMonth))})`);
-  if (m.ironore) L.push(`철광석 전월 ${sPct(m.ironore.mom)}`);
+  // 시장지표는 6개월 추이 델타를 1차 기준으로(해석 앵커) + 최근 전일/전월은 단기 보조로 병기
+  const t6 = (sym, nm, dp, shortNm, shortRef) => { const o = q[sym]; if (!o) return; L.push(`${nm} ${o.price.toFixed(dp)} (6개월 ${sPct(pctOf(o.price, o.first6m))}, 최근 ${shortNm} ${sPct(pctOf(o.price, o[shortRef]))})`); };
+  // 환율(6M)
+  t6("KRW=X", "원/달러", 1, "전일", "prevDay");
+  t6("MXN=X", "멕시코 페소", 2, "전일", "prevDay");
+  t6("THB=X", "태국 바트", 2, "전일", "prevDay");
+  // 원가 시장지표(6M)
+  t6("CL=F", "WTI", 1, "전일", "prevDay");
+  t6("HG=F", "구리", 2, "전월", "prevMonth");
+  if (m.steel && m.steel.trend) L.push(`철강 PPI ${m.steel.trend.price.toFixed(1)} (6개월 ${sPct(pctOf(m.steel.trend.price, m.steel.trend.first6m))})`);
+  else if (m.steel) L.push(`철강 PPI ${m.steel.val.toFixed(1)} (전월 ${sPct(m.steel.mom)})`);
+  if (m.resin) L.push(`레진 PPI ${m.resin.val.toFixed(1)} (전월 ${sPct(m.resin.mom)})`);
   if (s && s.scfi && s.scfi.value != null) L.push(`SCFI(상하이발 운임) ${s.scfi.value}${s.scfi.wow != null ? ` (전주 ${sPct(s.scfi.wow)})` : ""}`);
   if (s && s.fbx && s.fbx.value != null) L.push(`FBX(글로벌 운임) ${s.fbx.value}${s.fbx.wow != null ? ` (전주 ${sPct(s.fbx.wow)})` : ""}`);
-  if (q["^TNX"]) L.push(`美10Y ${q["^TNX"].price.toFixed(2)}% (전일 ${sPct(pctOf(q["^TNX"].price, q["^TNX"].prevDay))})`);
-  if (q["ITB"]) L.push(`홈빌더ETF(ITB) ${q["ITB"].price.toFixed(2)} (전일 ${sPct(pctOf(q["ITB"].price, q["ITB"].prevDay))})`);
-  if (q["XLY"]) L.push(`소비재ETF(XLY) ${q["XLY"].price.toFixed(2)} (전일 ${sPct(pctOf(q["XLY"].price, q["XLY"].prevDay))})`);
+  // 소비 지표
+  if (q["^TNX"]) { const o = q["^TNX"], bp6 = (o.price - o.first6m) * 100, bpD = (o.price - o.prevDay) * 100; L.push(`美10Y ${o.price.toFixed(2)}% (6개월 ${bp6 >= 0 ? "+" : ""}${Math.round(bp6)}bp, 최근 전일 ${bpD >= 0 ? "+" : ""}${Math.round(bpD)}bp)`); }
+  t6("ITB", "홈빌더ETF(ITB)", 2, "전일", "prevDay");
+  if (m.cpiUS && m.cpiUS.trend) { const t = m.cpiUS.trend, d = t.price - t.first6m; L.push(`美CPI(YoY) ${t.price.toFixed(1)}% (6개월 ${d >= 0 ? "+" : ""}${d.toFixed(1)}%p)`); }
+  else if (m.cpiUS) L.push(`美CPI 전년 ${sPct(m.cpiUS.yoy)}`);
+  if (m.cpiEU) L.push(`유럽CPI 전년 ${sPct(m.cpiEU.yoy)}`);
+  if (m.cpiKR) L.push(`韓CPI 전년 ${sPct(m.cpiKR.yoy)}`);
+  if (m.exhome && m.exhome.trend) { const t = m.exhome.trend; L.push(`기존주택거래 ${(t.price / 1e6).toFixed(2)}M (6개월 ${sPct(pctOf(t.price, t.first6m))})`); }
+  else if (m.exhome) L.push(`기존주택거래 ${(m.exhome.val / 1e6).toFixed(2)}M (전월 ${sPct(m.exhome.mom)})`);
+  if (m.umich) L.push(`美소비심리 ${m.umich.val.toFixed(1)}`);
   if (m.icsa) L.push(`美신규실업수당청구 ${Math.round(m.icsa.val / 1000)}K (전주 ${sPct(m.icsa.mom)})`);
   if (m.mortgage30) L.push(`美30Y모기지 ${m.mortgage30.val.toFixed(2)}% (전주 ${sPct(m.mortgage30.mom)})`);
-  if (m.cpiUS) L.push(`美CPI 전년 ${sPct(m.cpiUS.yoy)}`);
-  if (m.cpiKR) L.push(`韓CPI 전년 ${sPct(m.cpiKR.yoy)}`);
-  if (m.umich) L.push(`美소비심리 ${m.umich.val.toFixed(1)}`);
   const heads = (data.news || []).map((n, i) => {
     const meta = [n.grade, n.lens, (n.products || []).join("/"), (n.competitors || []).join("/")].filter(Boolean).join("·");
     return `${i}. 「${n.headline}」 (${meta})\n   요약: ${n.summary || "-"}`;
@@ -717,16 +753,16 @@ function summaryContext(data) {
   const ciTxt = (data.ciCand || []).length
     ? data.ciCand.map(c => `- [${c.axes.map(a => a.code).join("/")}] 「${c.headline}」`).join("\n")
     : "없음";
-  return `[오늘 지표]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[LG 전략축(A1~A6) 관련 뉴스]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
+  return `[지표 (해석은 6개월 추이 기준 — 시장지표에 6개월 델타 병기, 최근 전일/전월은 단기 보조; 물가·심리·주간·운임은 발표주기 델타)]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[LG 전략축(A1~A6) 관련 뉴스]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
 }
 function ruleSummary(data) {
   const q = data.q, seg = [];
   const add = (nm, v) => { if (v != null) seg.push(`${nm} ${v >= 0 ? "▲" : "▼"}${Math.abs(v).toFixed(1)}%`); };
-  if (q["KRW=X"]) add("원/달러", pctOf(q["KRW=X"].price, q["KRW=X"].prevDay));
-  if (q["CL=F"]) add("WTI", pctOf(q["CL=F"].price, q["CL=F"].prevDay));
-  if (q["HG=F"]) add("구리", pctOf(q["HG=F"].price, q["HG=F"].prevMonth));
-  if (q["ITB"]) add("홈빌더ETF", pctOf(q["ITB"].price, q["ITB"].prevDay));
-  const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 원가·소비 지표 점검` : "원가·소비 지표 데이터 수집 지연";
+  if (q["CL=F"]) add("WTI", pctOf(q["CL=F"].price, q["CL=F"].first6m));
+  if (q["HG=F"]) add("구리", pctOf(q["HG=F"].price, q["HG=F"].first6m));
+  if (q["KRW=X"]) add("원/달러", pctOf(q["KRW=X"].price, q["KRW=X"].first6m));
+  if (q["ITB"]) add("홈빌더ETF", pctOf(q["ITB"].price, q["ITB"].first6m));
+  const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 6개월 추이 기준 원가·소비 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
   return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "" }, newsWhy: {} };
@@ -749,11 +785,12 @@ async function aiSummary(env, data) {
             "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
             '{"hero":"...","consume":"...","cost":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
-            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
-            "- consume: 소비 환경(금리·수요ETF·주간지표·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
-            "  · 물가·주택·심리가 월간이라 당일 신선한 델타가 없으면, 일간 프록시(10Y 전일·홈빌더ETF ITB 전일·소비재ETF XLY 전일)나 주간 지표(신규 실업수당청구·30Y 모기지 전주)를 근거로 소비 방향을 서술한다. 매일 최소 하나의 신선 신호를 담는다.",
+            "- 해석 기준(최우선): hero·consume·cost의 방향과 의미는 6개월 추이를 1차 기준으로 삼는다. 시장지표(환율·유가·구리·철강·금리·홈빌더ETF·美CPI·기존주택)는 데이터에 '6개월' 델타가 병기돼 있으니 그 방향으로 큰 그림을 서술하고, '최근 전일/전월'은 단기 가속·되돌림을 짚을 때만 보조로 쓴다. 하루 등락으로 6개월 방향을 뒤집어 서술하지 않는다. 유럽·한국 CPI·소비심리·주간지표·운임(SCFI/FBX)은 발표주기 특성상 전년/전월/전주 델타를 그대로 쓴다.",
+            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 방향·의미는 6개월 추이를 기준으로 잡고 인과 고리를 6개월 델타와 함께 드러낸다(예: '원/달러 6개월 +6%로 수입 부품 원가 부담이 누적된 가운데…'). 최근 전일/전월은 단기 가속·되돌림일 때만 덧붙인다.",
+            "- consume: 소비 환경(CPI·금리·기존주택·홈빌더ETF·물가·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 美CPI·10Y·기존주택·홈빌더ETF는 6개월 추이 방향으로, 유럽·한국 CPI·심리는 발표주기 델타로 해석. 예: '인플레 둔화에도 고금리·주택 부진에 교체 수요 회복 지연 (美CPI 6M ▼0.5%p·10Y 6M +18bp·기존주택 6M ▼2.5%)'.",
+            "  · 소비 방향은 시장 프록시의 6개월 추이(美CPI YoY·10Y·기존주택·홈빌더ETF ITB)를 우선 근거로 서술하고, 주간 지표(신규 실업수당청구·30Y 모기지 전주)로 보완한다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
-            "- cost: 원가 환경(환율·유가·원자재·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임 — 둘 다 수출 물류비 방향 신호로 해석.",
+            "- cost: 원가 환경(유가·철강·원자재·환율·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 유가·철강·구리·환율은 6개월 추이 방향으로 해석하고 괄호에 6개월 델타 병기(예: 'WTI 6M +18%·철강 6M +6%·원/달러 6M +6%'). 운임은 발표주기 특성상 SCFI/FBX 전주比로 서술 — SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
             "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
@@ -762,12 +799,13 @@ async function aiSummary(env, data) {
             "  · 헤드라인·요약에 없는 사실·수치 창작 금지. content는 항상, opportunity·threat는 근거가 있을 때만 채운다.",
             "- 환율 해석 원칙 (원가 관점 전용 — 매출·수출 채산성 언급 금지):",
             "  · 모든 환율은 USD 대비 표기이며 수치 하락 = 해당 통화 강세.",
+            "  · 강세/약세 판정은 6개월 추이 방향으로 한다. 6개월 기준 원/달러 상승이면 하루 소폭 하락해도 '원화 약세 지속에 따른 수입 원가 부담'이 큰 그림이다.",
             "  · 원/달러 하락(원화 강세) = 달러 결제 원자재·부품의 원화 환산 구매원가 하락 요인.",
             "  · 생산거점 통화(페소=멕시코, 바트=태국, 동=베트남, 루피=인도, 즈워티=폴란드) 강세 = 현지 인건비·조달비의 달러 환산 상승 → 원가 '상승' 요인. 이 방향을 절대 뒤집지 말 것.",
             "  · 원화 강세와 생산거점 통화 강세는 원가에 반대 방향으로 작용 — 함께 움직일 때 '전방위 원가 하락'으로 뭉뚱그리지 말고 구분해 서술.",
             "- 추론 규율: 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열.",
             "  · 지표에 직접 없는 수요·판매·점유율은 단정하지 말 것. 거시지표에서 유추한 판단은 근거 지표를 반드시 괄호 병기.",
-            "  · '지속'·'추세'·'회복' 같은 시계열 표현은 제공된 전일/전월/전년 델타로 뒷받침될 때만 사용. 스냅샷 하나로 추세를 단정하지 않는다.",
+            "  · '지속'·'추세'·'회복' 같은 시계열 표현은 6개월 델타(시장지표) 또는 전년/전월/전주 델타(물가·심리·주간·운임)로 뒷받침될 때 사용한다. 하루치 스냅샷 하나로 추세를 단정하지 않는다.",
             "- [누적 신호(주간 축적 대비)]가 제공되면 hero에서 우선 활용한다 — 오늘 스냅샷이 아니라 '무엇이 며칠에 걸쳐 방향을 틀었는지'가 인사이트의 핵심. 이 블록의 방향·해석을 넘어서는 추가 단정은 하지 않는다.",
             "- [LG 전략축 관련 뉴스]가 제공되면 hero 또는 해당 뉴스의 content/threat에서 어느 전략축(예: A2 HVAC·AIDC)에 닿는 신호인지 한 번 짚어준다. 다만 제공된 헤드라인·요약 범위 안에서만 서술하고 축 진행 상황을 창작하지 않는다.",
           ].join("\n"),
@@ -839,13 +877,19 @@ export function renderEmail(data, opts = {}) {
     };
     return "https://quickchart.io/chart?bkg=transparent&v=4&w=132&h=42&c=" + encodeURIComponent(JSON.stringify(c));
   };
-  const trendCell = (label, valHtml, qi) => {
+  const trendCell = (label, valHtml, qi, opts) => {
     if (!qi) return `<td width="33%" style="padding:10px 8px;vertical-align:top"></td>`;
+    const mode = (opts && opts.delta) || "pct";
     const net = (qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
-    const col = net == null ? T.muted : (net >= 0 ? T.up : T.down);
-    const url = sparkUrl(qi.spark, net);
+    const abs = (qi.first6m != null) ? (qi.price - qi.first6m) : null;
+    let dirBase, deltaTxt;
+    if (mode === "pp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.abs(abs).toFixed(1)}%p`; }
+    else if (mode === "bp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.round(Math.abs(abs) * 100)}bp`; }
+    else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
+    const col = dirBase == null ? T.muted : (dirBase >= 0 ? T.up : T.down);
+    const url = sparkUrl(qi.spark, dirBase);
     const img = url ? `<img src="${url}" width="132" height="42" alt="" style="display:block;width:100%;max-width:150px;height:42px;margin:6px 0 4px">` : `<div style="height:42px;margin:6px 0 4px"></div>`;
-    const delta = net == null ? "" : `<span style="color:${col};font-weight:700">${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%</span>`;
+    const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     return `<td width="33%" style="padding:10px 8px;vertical-align:top">
         <div style="font-size:11px;color:${T.muted};font-weight:600">${label}</div>${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
@@ -857,15 +901,33 @@ export function renderEmail(data, opts = {}) {
       <tr>${cells}</tr></table>`;
   const uPct = `<span style="font-size:11px;color:${T.muted}">%</span>`;
   const uLb = `<span style="font-size:11px;color:${T.muted}">/lb</span>`;
+  const uM = `<span style="font-size:11px;color:${T.muted}">M</span>`;
+  const uP = `<span style="font-size:11px;color:${T.muted}">p</span>`;
+  // 6M 순변동(비율) 계산 + 불릿용 배지
+  const net6 = qi => (qi && qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
+  const badge6 = qi => { const n = net6(qi); return n == null ? "" : ` <span style="color:${n >= 0 ? T.up : T.down};font-weight:600">${n >= 0 ? "▲" : "▼"}${Math.abs(n).toFixed(1)}%</span> <span style="color:${T.muted};font-size:12px">(6M)</span>`; };
+  const cpiT = (m.cpiUS && m.cpiUS.trend) || null;
+  const exhT = (m.exhome && m.exhome.trend) || null;
+  const steelT = (m.steel && m.steel.trend) || null;
+  const scfiT = (s && s.scfi && s.scfi.trend) || null;
+  const scfiPx = (s && s.scfi && s.scfi.value != null) ? s.scfi.value : null;
   const consumeTrend = trendStrip([
-    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"]),
-    trendCell("홈빌더 ITB", `$${fmt(q["ITB"] ? q["ITB"].price : null)}`, q["ITB"]),
-    trendCell("소비재 XLY", `$${fmt(q["XLY"] ? q["XLY"].price : null)}`, q["XLY"]),
+    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp" }),
+    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp" }),
+    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT),
   ].join(""));
+  const scfiCell = scfiT
+    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT)
+    : `<td width="33%" style="padding:10px 8px;vertical-align:top">
+        <div style="font-size:11px;color:${T.muted};font-weight:600">SCFI 운임</div>
+        <div style="height:42px;margin:6px 0 4px"></div>
+        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmt(scfiPx, 0) + uP : "—"}</div>
+        <div style="font-size:11px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
+      </td>`;
   const costTrend = trendStrip([
-    trendCell("원/달러", fmt(q["KRW=X"] ? q["KRW=X"].price : null, 1), q["KRW=X"]),
     trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"]),
-    trendCell("구리", `$${fmt(q["HG=F"] ? q["HG=F"].price : null)}${uLb}`, q["HG=F"]),
+    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT),
+    scfiCell,
   ].join(""));
 
   // 누적 신호 스트립(임계 돌파분만 — 없으면 미표시)
@@ -876,55 +938,30 @@ export function renderEmail(data, opts = {}) {
         ${sigBreaches.map(b => `<div style="margin-top:7px;font-size:13px;color:${T.text};line-height:1.5"><b style="color:${b.dir >= 0 ? T.up : T.down}">${esc(b.label)}</b> <span style="color:${T.muted}">${esc(b.detail)}</span></div>`).join("")}
       </div></td></tr>` : "";
 
-  // 원가 (전부 MoM)
-  const fxParts = [
-    q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${dchg(q["KRW=X"])}` : null,
-    q["MXN=X"] ? `페소 <b>${fmt(q["MXN=X"].price)}</b>${dchg(q["MXN=X"])}` : null,
-    q["THB=X"] ? `바트 <b>${fmt(q["THB=X"].price)}</b>${dchg(q["THB=X"])}` : null,
-    q["VND=X"] ? `동 <b>${fmt(q["VND=X"].price, 0)}</b>${dchg(q["VND=X"])}` : null,
-    q["INR=X"] ? `루피 <b>${fmt(q["INR=X"].price)}</b>${dchg(q["INR=X"])}` : null,
-    q["PLN=X"] ? `즈워티 <b>${fmt(q["PLN=X"].price)}</b>${dchg(q["PLN=X"])}` : null,
-  ].filter(Boolean).join(dot);
+  // 원가 추가지표: 원자재·환율 2줄(성격 라벨 우선). 유가·철강·SCFI는 위 6개월 추이 차트로.
   const matParts = [
-    q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${mom(q["HG=F"])}` : null,
-    m.ironore ? `철광석 <b>$${fmt(m.ironore.val, 1)}/t</b>${arrow(m.ironore.mom)} <span style="color:${T.muted};font-size:12px">(${m.ironore.date})</span>` : null,
+    q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${badge6(q["HG=F"])}` : null,
+    m.resin ? `레진 <b>${fmt(m.resin.val, 1)}</b>${m.resin.mom != null ? arrow(m.resin.mom) : ""} <span style="color:${T.muted};font-size:12px">(${m.resin.date})</span>` : null,
   ].filter(Boolean).join(dot);
-  const freightUnit = (o, name) => o && o.value != null
-    ? `${name} <b>${fmt(o.value, 0)}</b>${o.wow != null ? arrow(o.wow) : ""}${o.asof ? ` <span style="color:${T.muted};font-size:12px">(${esc(o.asof)})</span>` : ""}`
-    : null;
-  const freightParts = s ? [freightUnit(s.scfi, "SCFI"), freightUnit(s.fbx, "FBX")].filter(Boolean).join(dot) : "";
-  const fbxVal = freightParts || `<b>—</b> <span style="color:${T.muted};font-size:12px">(수동 갱신)</span>`;
+  const fxParts = [
+    q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${badge6(q["KRW=X"])}` : null,
+    q["MXN=X"] ? `멕시코 페소 <b>${fmt(q["MXN=X"].price)}</b>` : null,
+    q["THB=X"] ? `태국 바트 <b>${fmt(q["THB=X"].price)}</b>` : null,
+  ].filter(Boolean).join(dot);
   const cost = [
-    fxParts ? line(`${lbl("환율")} ${fxParts}`) : "",
-    q["CL=F"] ? line(`${lbl("유가")} WTI <b>$${fmt(q["CL=F"].price)}</b>${dchg(q["CL=F"])}`) : "",
-    matParts ? line(`${lbl("원자재")} ${matParts}`) : "",
-    line(`${lbl("운임")} ${fbxVal}`),
+    matParts ? line(`${lbl("원자재 :")} ${matParts}`) : "",
+    fxParts ? line(`${lbl("환율 :")} ${fxParts}`) : "",
   ].join("");
 
-  // 소비
-  const bp = q["^TNX"] && q["^TNX"].prevDay != null ? Math.round((q["^TNX"].price - q["^TNX"].prevDay) * 100) : null;
+  // 소비 추가지표: 물가·수요·심리 3줄(성격 라벨 우선). CPI·금리·기존주택은 위 6개월 추이 차트로.
   const yoyTxt = st => st && st.yoy != null ? `<b>${st.yoy >= 0 ? "+" : ""}${st.yoy.toFixed(1)}%</b> <span style="color:${T.muted};font-size:12px">(${st.date})</span>` : "<b>—</b>";
-  // 주간 지표: fredStat.mom = 전주比. 릴리스일(목) 외에도 최신 발표치를 항상 표기.
-  const wkTxt = (st, unit, dg = 0) => st && st.val != null
-    ? `<b>${fmt(st.val, dg)}${unit}</b>${st.mom != null ? arrow(st.mom) : ""} <span style="color:${T.muted};font-size:12px">(${st.date})</span>`
-    : "<b>—</b>";
-  const demandParts = [
-    q["ITB"] ? `홈빌더(ITB) <b>$${fmt(q["ITB"].price)}</b>${dchg(q["ITB"])}` : null,
-    q["XLY"] ? `소비재(XLY) <b>$${fmt(q["XLY"].price)}</b>${dchg(q["XLY"])}` : null,
-  ].filter(Boolean).join(dot);
   const consume = [
-    q["^TNX"] ? line(`${lbl("금리")} 美 10Y <b>${fmt(q["^TNX"].price)}%</b>${bp != null ? ` <span style="color:${bp >= 0 ? T.up : T.down};font-weight:600">${bp >= 0 ? "▲" : "▼"}${Math.abs(bp)}bp</span>` : ""}`) : "",
-    demandParts ? line(`${lbl("수요")} ${demandParts}`) : "",
-    (m.icsa || m.mortgage30) ? line(`${lbl("주간")} ${[
-      m.icsa ? `실업수당청구 ${m.icsa.val != null ? `<b>${fmt(m.icsa.val / 1000, 0)}K</b>${m.icsa.mom != null ? arrow(m.icsa.mom) : ""} <span style="color:${T.muted};font-size:12px">(${m.icsa.date})</span>` : "<b>—</b>"}` : null,
-      m.mortgage30 ? `30Y 모기지 ${wkTxt(m.mortgage30, "%", 2)}` : null,
+    (m.cpiEU || m.cpiKR) ? line(`${lbl("물가 :")} ${[
+      m.cpiEU ? `유럽 CPI ${yoyTxt(m.cpiEU)}` : null,
+      m.cpiKR ? `한국 CPI ${yoyTxt(m.cpiKR)}` : null,
     ].filter(Boolean).join(dot)}`) : "",
-    line(`${lbl("물가")} 美 CPI ${yoyTxt(m.cpiUS)}${dot}PCE ${yoyTxt(m.pce)}${dot}韓 CPI ${yoyTxt(m.cpiKR)}`),
-    m.houst || m.exhome ? line(`${lbl("주택")} ${[
-      m.houst ? `착공 <b>${fmt(m.houst.val, 0)}K</b>${arrow(m.houst.mom)}` : null,
-      m.exhome ? `기존판매 <b>${fmt(m.exhome.val / 1e6, 2)}M</b>${arrow(m.exhome.mom)}` : null,
-    ].filter(Boolean).join(dot)} <span style="color:${T.muted};font-size:12px">(${(m.houst || m.exhome).date})</span>`) : "",
-    m.umich ? line(`${lbl("심리")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:12px">(${m.umich.date})</span>`) : "",
+    q["ITB"] ? line(`${lbl("수요 :")} 홈빌더 ITB <b>$${fmt(q["ITB"].price)}</b>${badge6(q["ITB"])}`) : "",
+    m.umich ? line(`${lbl("심리 :")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:12px">(${m.umich.date})</span>`) : "",
   ].join("");
 
   // 콘텐츠
@@ -982,8 +1019,8 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("소비", consumeTrend + consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
-    ${section("원가", costTrend + cost, "환율·유가 전일 · 운임 전주 · 원자재 전월", false, sm.sec.cost)}
+    ${section("소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
+    ${section("원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
@@ -992,7 +1029,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
-    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더/소비재ETF), FRED(실업수당청구·모기지·CPI·PCE·주택·소비심리·철광석), SCFI(Shanghai Containerized Freight Index·상하이발 운임)·FBX(Freightos Baltic Index·글로벌 운임, web_search 주간 캐시). 비교시점: 환율·유가·수요ETF 전일, 운임 전주, 주간지표 전주, 원자재 전월, 물가 전년, 주택·심리 전월. 주간/월간지표는 최신 발표치 기준.
+    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 주간 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 누적 축적분 기준.
   </div>
 </td></tr>
 </table>
