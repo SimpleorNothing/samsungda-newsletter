@@ -817,18 +817,34 @@ export function renderEmail(data, opts = {}) {
   const sm = { hero: sm0.hero || [sm0.macro, sm0.news].filter(Boolean).join(". "), sec: sm0.sec || {}, newsWhy: sm0.newsWhy || {} };
   const insight = t => t ? `<div style="margin-top:8px;padding:8px 12px;background:${T.bg};border-left:3px solid ${T.brand};font-size:13px;color:${T.muted};line-height:1.55">${esc(t)}</div>` : "";
 
-  // 추이 스트립: 6개월 일봉 시리즈 → QuickChart 라인 PNG(이메일 안전). 이미지 차단 대비 vs 6M 델타 텍스트 병기.
-  const sparkUrl = (series, color) => {
+  // 추이 스트립: 6개월 일봉 시리즈 → QuickChart Baseline PNG(이메일 안전). 이미지 차단 대비 vs 6M 델타 텍스트 병기.
+  // hex → rgba(투명도) : QuickChart 면적 채움 색 생성. T 토큰 기반이라 리터럴 색 하드코딩 아님.
+  const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
+  // Baseline: 기간시작(series[0]) 기준선 위=상승색(적)·아래=하락색(청) 면적 채움 + 방향색 라인. Chart.js v4 fill.above/below.
+  const sparkUrl = (series, net) => {
     if (!series || series.length < 4) return "";
-    const c = { type: "sparkline", data: { datasets: [{ data: series, borderColor: color, borderWidth: 2, pointRadius: 0, fill: false, lineTension: 0.25 }] } };
-    return "https://quickchart.io/chart?bkg=transparent&w=132&h=36&c=" + encodeURIComponent(JSON.stringify(c));
+    const ref = series[0];
+    const lineCol = net == null ? T.muted : (net >= 0 ? T.up : T.down);
+    const c = {
+      type: "line",
+      data: { labels: series.map(() => ""), datasets: [{
+        data: series, borderColor: lineCol, borderWidth: 2, pointRadius: 0, tension: 0.28,
+        fill: { target: { value: ref }, above: rgba(T.up, 0.15), below: rgba(T.down, 0.15) },
+      }] },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: { x: { display: false }, y: { display: false, grace: "12%" } },
+        layout: { padding: 2 },
+      },
+    };
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=132&h=42&c=" + encodeURIComponent(JSON.stringify(c));
   };
   const trendCell = (label, valHtml, qi) => {
     if (!qi) return `<td width="33%" style="padding:10px 8px;vertical-align:top"></td>`;
     const net = (qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
     const col = net == null ? T.muted : (net >= 0 ? T.up : T.down);
-    const url = sparkUrl(qi.spark, col);
-    const img = url ? `<img src="${url}" width="132" height="36" alt="" style="display:block;width:100%;max-width:150px;height:36px;margin:6px 0 4px">` : `<div style="height:36px;margin:6px 0 4px"></div>`;
+    const url = sparkUrl(qi.spark, net);
+    const img = url ? `<img src="${url}" width="132" height="42" alt="" style="display:block;width:100%;max-width:150px;height:42px;margin:6px 0 4px">` : `<div style="height:42px;margin:6px 0 4px"></div>`;
     const delta = net == null ? "" : `<span style="color:${col};font-weight:700">${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%</span>`;
     return `<td width="33%" style="padding:10px 8px;vertical-align:top">
         <div style="font-size:11px;color:${T.muted};font-weight:600">${label}</div>${img}
