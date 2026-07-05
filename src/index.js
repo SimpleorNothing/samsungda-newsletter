@@ -1041,11 +1041,13 @@ export function renderEmail(data, opts = {}) {
           x: { display: true, grid: { display: false, drawTicks: false }, border: { display: false }, ticks: { color: T.muted, font: { size: 28 }, autoSkip: false, maxRotation: 0, align: "inner", padding: 6 } },
           y: { display: false, min: lo, max: hi },   // 저점=하단·고점=상단 (grace 없이 꽉 채움)
         },
-        layout: { padding: { top: 14, left: 12, right: 12, bottom: 2 } },
+        layout: { padding: { top: 6, left: 12, right: 12, bottom: 2 } },
       },
     };
-    // 그라데이션은 QuickChart 헬퍼 표현식이라 함수여야 함 → 문자열 플레이스홀더를 raw 표현식으로 치환.
-    const json = JSON.stringify(c).replace('"__GRAD__"', `getGradientFillHelper('vertical', ['${rgba(lineCol, 0.45)}','${rgba(lineCol, 0)}'])`);
+    // 그라데이션: 플롯 영역(chartArea)에 정확히 매핑되는 Chart.js 스크립터블 함수로 생성 —
+    // 상단(라인 쪽) 진함 → 하단(플롯 바닥) 완전 투명. (헬퍼는 x축 라벨 영역까지 캔버스 전체에 매핑돼 바닥이 안 투명해지는 문제 회피)
+    const gradFn = `function(c){var a=c.chart.chartArea;if(!a)return '${rgba(lineCol, 0.16)}';var g=c.chart.ctx.createLinearGradient(0,a.top,0,a.bottom);g.addColorStop(0,'${rgba(lineCol, 0.42)}');g.addColorStop(1,'${rgba(lineCol, 0)}');return g;}`;
+    const json = JSON.stringify(c).replace('"__GRAD__"', gradFn);
     return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(json);
   };
   // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
@@ -1068,12 +1070,12 @@ export function renderEmail(data, opts = {}) {
     const ready = !!(sp && sp.length >= 4);
     const ax = ready ? { m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date) } : null;
     const vals = ready
-      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:200px;margin:6px 0 0;font-size:12px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:200px;margin:10px 0 -2px;font-size:12px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
           <td align="left" style="color:${T.muted}">${fvt(sp[0])}</td>
           <td align="right" style="color:${T.muted}">${fvt(sp[sp.length - 1])}</td></tr></table>`
       : "";
     const url = qi ? sparkUrl(qi.spark, dirBase, good, ax) : "";
-    const img = url ? `<img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;max-width:200px;height:auto;margin:2px 0 4px">` : `<div style="height:150px;margin:2px 0 4px"></div>`;
+    const img = url ? `<img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;max-width:200px;height:auto;margin:0 0 4px">` : `<div style="height:150px;margin:0 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
