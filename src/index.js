@@ -951,8 +951,8 @@ async function aiSummary(env, data) {
             "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
-            "  · opportunity: 당사(DA) 기회 — 반드시 '당사는'으로 시작해 당사의 현황·강점·포지션을 짚고, '이는 ~~~ 당사에게도 기회'(또는 '…당사에도 기회 요인') 형태로 마무리하는 한 문장(80자 이내). 수요·원가·제품 포트폴리오·역외 거점 관점의 기회 요인을 소식 내용에 맞춰 자연스러운 워딩으로 담는다. 기회 요인이 불분명하면 빈 문자열.",
-            "  · threat: 당사(DA) 위협 — 반드시 '반면'으로 시작해 경쟁사·시장·정책의 움직임을 짚고, '~~~ 경쟁 심화'(또는 '…원가 부담·수요 둔화 심화') 등 당사에 가해지는 위협으로 마무리하는 한 문장(80자 이내). 경쟁 심화·원가 상승·규제·수요 둔화 관점의 위협 요인을 소식 내용에 맞춰 자연스러운 워딩으로 담는다. 위협 요인이 불분명하면 빈 문자열.",
+            "  · opportunity: 당사(DA) 기회 — 당사의 현황·강점·포지션(수요·원가·제품 포트폴리오·역외 거점 관점)을 짚어 이 소식이 당사에 유리하게 작용하는 지점을 한 문장(80자 이내)으로 쓴다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 시작말·맺음말을 항목마다 바꿔 쓴다. 시작말은 '당사는'에만 매이지 말고 '당사도'·'당사 입장에선'·'우리 DA엔'·'당사 관점에선' 등에서, 맺음말은 '…당사에 기회 요인'·'…당사가 선점할 여지'·'…당사 강점을 살릴 국면'·'…당사에 우호적 환경'·'…당사 포지션에 순풍'·'…당사에 반사이익' 등에서 돌려 쓰며, 같은 호 안에서 동일 시작말·맺음말을 반복하지 않는다. 기회 요인이 불분명하면 빈 문자열.",
+            "  · threat: 당사(DA) 위협 — 경쟁사·시장·정책의 움직임(경쟁 심화·원가 상승·규제·수요 둔화 관점)이 당사에 가하는 압박을 한 문장(80자 이내)으로 쓴다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 시작말·맺음말을 항목마다 바꿔 쓴다. 시작말은 '반면'에만 매이지 말고 '다만'·'한편'·'그러나'·'경쟁 측면에선' 등 대비 접속을 돌려 쓰고, 맺음말은 '…경쟁 심화'·'…입지 위협'·'…점유율 잠식 우려'·'…부담 가중'·'…추격 압박'·'…설 자리 축소'·'…수요 둔화 리스크' 등에서 돌려 쓰되, 같은 호 안에서 동일 시작말·맺음말을 반복하지 않는다. 위협 요인이 불분명하면 빈 문자열.",
             "  · 세 필드 모두 사실·방향 서술만 담는다. '검토 필요'·'대응해야'·'추진 여지' 等 실행 제안·액션 권고 금지 (실행 판단은 사람의 몫).",
             "  · 헤드라인·요약에 없는 사실·수치 창작 금지. content는 항상, opportunity·threat는 근거가 있을 때만 채운다.",
             "- 환율 해석 원칙 (원가 관점 전용 — 매출·수출 채산성 언급 금지):",
@@ -1163,18 +1163,10 @@ export function renderEmail(data, opts = {}) {
   ].join("");
 
   // 콘텐츠
-  // 뉴스별 내용 — 기사 자체 요약(summary)을 항상 노출. 최대 160자 클립.
-  const newsContentRow = txt => {
-    if (!txt) return "";
-    const s = String(txt);
-    const clipped = s.length > 160 ? s.slice(0, 160).replace(/\s+\S*$/, "") + "…" : s;
-    return `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7">${esc(clipped)}</div>`;
-  };
-  // 당사(DA) 관점 기회·위협(AI 생성분이 있을 때만). 내용은 위 요약으로 대체.
-  const newsWhyRows = w => {
-    if (!w || typeof w === "string") return "";
+  const newsWhyRows = (w, fallbackContent = "") => {
+    const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : (w || {});
     const row = (text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="color:${color};font-weight:700;padding:0 3px 0 0">•</span>${esc(text)}</div>` : "";
-    return row(w.opportunity, T.brand) + row(w.threat, T.up);
+    return row(o.content || fallbackContent, T.text) + row(o.opportunity, T.brand) + row(o.threat, T.up);
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
@@ -1187,8 +1179,7 @@ export function renderEmail(data, opts = {}) {
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
-        ${newsContentRow(i.summary)}
-        ${newsWhyRows(sm.newsWhy[ni])}
+        ${newsWhyRows(sm.newsWhy[ni], i.summary || "")}
         <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
         </tr></table>`;
       }).join("")
