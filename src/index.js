@@ -12,12 +12,19 @@
 // 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
 // 인사이트: [누적신호] R2 signals/history.json 일별 스냅샷 축적 → 주간 델타·연속 스트릭·수요 분화(ITB↔XLY) 임계 감지. preview는 읽기전용, 실발송/cron만 기록.
 //           [CI라우팅] MI뉴스 → LG 전략축(A1~A6) 키워드 매칭 → LG 관련건 축 뱃지 + signals/ci-candidates.json 스테이징(사람 검토용, evidence.json 자동커밋 없음).
+//           [CI연동] competitor_intelligence 레포의 strategies.json·evidence.json(사람이 검토·확정한 사실)을 raw.githubusercontent.com에서 직접 읽어
+//                     AI 요약 프롬프트에 "검증된 최근 동향"으로 제공 — 위 CI라우팅(미검증 후보)보다 우선 신뢰.
 
 import { SCFI_SEED } from "./scfi-seed.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
 const REPORT_BASE = "https://samsungda.net/research/";      // 보고서 파일: /research/<R2 key> 로 항목별 연결
+// CI(경쟁사 전략 추적) 보드 데이터 — ci.samsungda.net 자체는 포탈 SSO 게이트가 걸려 있어 직접 fetch 불가.
+// competitor_intelligence 레포가 public이라 raw.githubusercontent.com 원본(JSON)을 그대로 읽는다(CI 자체가
+// MI news.json을 참고할 때 쓰는 것과 동일한 패턴). 사람이 검토·확정한 evidence.json 기준 — AI 요약의 근거로 사용.
+const CI_STRATEGIES_URL = "https://raw.githubusercontent.com/SimpleorNothing/competitor_intelligence/main/public/data/strategies.json";
+const CI_EVIDENCE_URL = "https://raw.githubusercontent.com/SimpleorNothing/competitor_intelligence/main/public/data/evidence.json";
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
@@ -57,6 +64,7 @@ const T = {
 
 // 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
 const CHANGELOG = [
+  { d: "2026.07.05", t: "'오늘의 맥락' AI 요약이 CI(경쟁사 전략 추적) 보드의 검증된 최근 동향을 실제로 참고하도록 연동" },
   { d: "2026.07.05", t: "추이 그래프 상단 헤드룸(기본 70%·우측 끝 최고점이면 65%) — 최신값이 최고점일 때 값 라벨이 그래프 위쪽에 앉도록" },
   { d: "2026.07.05", t: "추이 그래프: 유리 파랑·불리 빨강 단일색 + 세로 그라데이션 적용" },
   { d: "2026.07.05", t: "추이 그래프 2배 확대 · 저점/고점 상하 꽉채움 · 처음/마지막 값·연월(x축) 표기" },
@@ -434,7 +442,7 @@ async function run(env, { send }) {
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
   const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
-  const [yq, macro, freight, newsPool, ideas, reports, sigHist, scfiHist] = await Promise.all([
+  const [yq, macro, freight, newsPool, ideas, reports, sigHist, scfiHist, ciBoard] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
     getMacro(env),
     getFreight(env),
@@ -443,11 +451,12 @@ async function gatherData(env) {
     getReports(env),
     loadSignalHistory(env),
     loadScfiHistory(env),
+    getCiBoard(),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
   const news = (newsPool || []).slice(0, 5);
   await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
-  const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
+  const data = { date: kstDate(), q, macro, freight, news, ideas, reports, ciBoard };
   data.signals = analyzeSignals(sigHist, data);
   // SCFI 6개월 추이: 엑셀 seed + R2 누적(web_search 갱신분) + 오늘 관측치를 날짜로 병합 → 추이셀.
   if (data.freight && data.freight.scfi) {
@@ -821,6 +830,33 @@ async function getNews() {
   } catch { return []; }
 }
 
+// CI 보드(경쟁사 전략 추적)의 사람이 검토·확정한 최근 동향(evidence.json) — strategies.json의
+// 축 코드/제목/진행상태(execStatus)와 조인해 AI 요약 프롬프트의 근거로 넘긴다. 실패 시 빈 배열(무이슈 폴백).
+async function getCiBoard() {
+  try {
+    const [sRes, eRes] = await Promise.all([fetch(CI_STRATEGIES_URL, UA), fetch(CI_EVIDENCE_URL, UA)]);
+    const strategies = sRes.ok ? await sRes.json() : null;
+    const evidence = eRes.ok ? await eRes.json() : null;
+    if (!evidence) return [];
+    const axisMap = {};
+    for (const co of (strategies && strategies.companies) || []) {
+      if (co.id) axisMap[co.id + "-frame"] = { code: "F0", title: "전략 프레임" }; // CI 보드의 loadAxisCatalog와 동일한 프레임 pseudo-axis
+      for (const ax of (co.axes || [])) axisMap[ax.id] = { code: ax.code, title: ax.title, execStatus: ax.execStatus };
+    }
+    return (evidence.items || [])
+      .slice()
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+      .slice(0, 6)
+      .map(it => {
+        const ax = axisMap[it.axisId] || {};
+        return {
+          date: it.date || "", axisCode: ax.code || "", axisTitle: ax.title || "", execStatus: ax.execStatus || "",
+          event: it.event || "", interpretation: it.interpretation || "", confidence: it.confidence || "",
+        };
+      });
+  } catch { return []; }
+}
+
 // 기사 원문 og:image 추출 — 표시용 뉴스에만 사용. 실패 시 빈 문자열(무이미지 폴백).
 async function fetchOgImage(url) {
   if (!url) return "";
@@ -911,7 +947,10 @@ function summaryContext(data) {
   const ciTxt = (data.ciCand || []).length
     ? data.ciCand.map(c => `- [${c.axes.map(a => a.code).join("/")}] 「${c.headline}」`).join("\n")
     : "없음";
-  return `[지표 (해석은 6개월 추이 기준 — 시장지표에 6개월 델타 병기, 최근 전일/전월은 단기 보조; 물가·심리·주간·운임은 발표주기 델타)]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[LG 전략축(A1~A6) 관련 뉴스]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
+  const ciBoardTxt = (data.ciBoard || []).length
+    ? data.ciBoard.map(c => `- [${c.axisCode}${c.axisTitle ? " " + c.axisTitle : ""}]${c.execStatus ? `(진행:${c.execStatus})` : ""} ${c.date}: ${c.event}${c.interpretation ? ` → ${c.interpretation}` : ""}`).join("\n")
+    : "없음";
+  return `[지표 (해석은 6개월 추이 기준 — 시장지표에 6개월 델타 병기, 최근 전일/전월은 단기 보조; 물가·심리·주간·운임은 발표주기 델타)]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[CI 경쟁사 전략 추적 보드 — 검증된 최근 동향]\n${ciBoardTxt}\n\n[LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
 }
 // 규칙 기반 섹션 인사이트 — AI 요약이 없거나 공란일 때도 소비·원가·뉴스에 항상 해석 한 줄을 채운다.
 // 6개월 추이 방향을 1차 기준으로, spark(6개월 시리즈)에서 고점·저점 대비 위치를 읽어 되돌림 뉘앙스까지 포착.
@@ -1059,7 +1098,8 @@ async function aiSummary(env, data) {
             "  · 지표에 직접 없는 수요·판매·점유율은 단정하지 말 것. 거시지표에서 유추한 판단은 근거 지표를 반드시 괄호 병기.",
             "  · '지속'·'추세'·'회복' 같은 시계열 표현은 6개월 델타(시장지표) 또는 전년/전월/전주 델타(물가·심리·주간·운임)로 뒷받침될 때 사용한다. 하루치 스냅샷 하나로 추세를 단정하지 않는다.",
             "- [누적 신호(주간 축적 대비)]가 제공되면 hero에서 우선 활용한다 — 오늘 스냅샷이 아니라 '무엇이 며칠에 걸쳐 방향을 틀었는지'가 인사이트의 핵심. 이 블록의 방향·해석을 넘어서는 추가 단정은 하지 않는다.",
-            "- [LG 전략축 관련 뉴스]가 제공되면 hero 또는 해당 뉴스의 content/threat에서 어느 전략축(예: A2 HVAC·AIDC)에 닿는 신호인지 한 번 짚어준다. 다만 제공된 헤드라인·요약 범위 안에서만 서술하고 축 진행 상황을 창작하지 않는다.",
+            "- [CI 경쟁사 전략 추적 보드 — 검증된 최근 동향]은 사람이 검토·확정한 사실(evidence.json)이다. [LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]보다 신뢰도가 높으므로, 겹치는 주제가 있으면 이 블록을 우선 근거로 삼는다. hero 또는 관련 뉴스의 content/threat에서 어느 전략축이 어떤 진행 상태(가속/순항/지연/방향전환)에 있는지 실제로 반영해 서술하되, 여기 없는 축·진행 상황은 창작하지 않는다.",
+            "- [LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]가 제공되면 hero 또는 해당 뉴스의 content/threat에서 어느 전략축(예: A2 HVAC·AIDC)에 닿는 신호인지 한 번 짚어준다. 다만 제공된 헤드라인·요약 범위 안에서만 서술하고 축 진행 상황을 창작하지 않는다. 이 블록은 아직 사람이 검토하지 않은 후보이므로 확정된 사실처럼 단정하지 않는다.",
           ].join("\n"),
           messages: [{ role: "user", content: summaryContext(data) }],
         }),
