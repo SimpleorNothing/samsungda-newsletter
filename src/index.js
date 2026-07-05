@@ -1019,11 +1019,18 @@ export function renderEmail(data, opts = {}) {
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = favCol(dirBase, good);
     const url = qi ? sparkUrl(qi.spark, dirBase, good) : "";
-    const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:8px 0 6px">` : `<div style="height:84px;margin:8px 0 6px"></div>`;
+    const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:8px 0 4px">` : `<div style="height:84px;margin:8px 0 4px"></div>`;
+    // 그래프 양 끝(처음=6개월 전·마지막=현재) 수치를 차트 아래 좌·우 정렬로 병기. fv 없으면 기본 포맷.
+    const fv = (opts && opts.fv) || (v => fmt(v));
+    const ends = (qi && qi.first6m != null && qi.price != null)
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:180px;margin:0 0 6px;font-size:11px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
+          <td align="left" style="color:${T.muted}">${fv(qi.first6m)}</td>
+          <td align="right" style="color:${T.muted}">${fv(qi.price)}</td></tr></table>`
+      : "";
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
-        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}
+        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}${ends}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
         <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
@@ -1044,12 +1051,12 @@ export function renderEmail(data, opts = {}) {
   const scfiT = (s && s.scfi && s.scfi.trend) || null;
   const scfiPx = (s && s.scfi && s.scfi.value != null) ? s.scfi.value : null;
   const consumeTrend = trendStrip([
-    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp" }),
-    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp" }),
-    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true }),
+    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp", fv: v => `${fmt(v, 1)}${uPct}` }),
+    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fv: v => `${fmt(v)}${uPct}` }),
+    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true, fv: v => `${fmt(v / 1e6, 2)}${uM}` }),
   ].join(""));
   const scfiCell = scfiT
-    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT)
+    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT, { fv: v => `${fmt(v, 0)}${uP}` })
     : `<td width="33%" style="padding:16px 10px;vertical-align:top">
         <div style="font-size:13px;color:${T.muted};font-weight:600">SCFI 운임</div>
         <div style="height:84px;margin:8px 0 6px"></div>
@@ -1057,8 +1064,8 @@ export function renderEmail(data, opts = {}) {
         <div style="font-size:13px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
       </td>`;
   const costTrend = trendStrip([
-    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"]),
-    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT),
+    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fv: v => `$${fmt(v)}` }),
+    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT, { fv: v => fmt(v, 1) }),
     scfiCell,
   ].join(""));
 
