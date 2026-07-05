@@ -57,6 +57,7 @@ const T = {
 
 // 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
 const CHANGELOG = [
+  { d: "2026.07.05", t: "추이 그래프 상단 헤드룸(기본 70%·우측 끝 최고점이면 65%) — 최신값이 최고점일 때 값 라벨이 그래프 위쪽에 앉도록" },
   { d: "2026.07.05", t: "추이 그래프: 유리 파랑·불리 빨강 단일색 + 세로 그라데이션 적용" },
   { d: "2026.07.05", t: "추이 그래프 2배 확대 · 저점/고점 상하 꽉채움 · 처음/마지막 값·연월(x축) 표기" },
   { d: "2026.07.05", t: "추이 그래프 색상을 등락 방향이 아닌 '당사 유불리' 기준으로 변경" },
@@ -1117,7 +1118,10 @@ export function renderEmail(data, opts = {}) {
     const lineCol = favCol(net, good);
     const m0 = (ax && ax.m0) || "", m1 = (ax && ax.m1) || "";
     let lo = Math.min(...series), hi = Math.max(...series);
+    const peakRight = series[last] === hi;   // 우측 끝(최신값)이 6개월 최고점인가
     if (hi === lo) { const e = (Math.abs(lo) || 1) * 0.02; lo -= e; hi += e; }   // 평평한 시리즈 폴백
+    const fill = peakRight ? 0.65 : 0.70;    // 데이터가 세로로 차지할 비율(기본 70%·우측 끝 최고점이면 65%) → 상단 헤드룸 확보
+    const yMax = lo + (hi - lo) / fill;      // 헤드룸은 상단에만: 저점=하단 고정, 고점은 플롯의 fill 높이까지만
     const c = {
       type: "line",
       data: { labels: series.map((_, i) => i === 0 ? m0 : (i === last ? m1 : "")), datasets: [{
@@ -1130,7 +1134,7 @@ export function renderEmail(data, opts = {}) {
         plugins: { legend: { display: false } },
         scales: {
           x: { display: true, grid: { display: false, drawTicks: false }, border: { display: false }, ticks: { color: T.muted, font: { size: 28 }, autoSkip: false, maxRotation: 0, align: "inner", padding: 6 } },
-          y: { display: false, min: lo, max: hi },   // 저점=하단·고점=상단 (grace 없이 꽉 채움)
+          y: { display: false, min: lo, max: yMax },   // 저점=하단 고정·상단 헤드룸(fill 비율) — 우측 끝 최고점의 값 라벨이 그래프 위쪽에 앉도록
         },
         layout: { padding: { top: 6, left: 12, right: 12, bottom: 2 } },
       },
@@ -1158,10 +1162,15 @@ export function renderEmail(data, opts = {}) {
     const sp = qi && qi.spark;
     const ready = !!(sp && sp.length >= 4);
     const ax = ready ? { m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date) } : null;
-    // 끝점 세로 위치(%): 차트 400x232, 플롯영역 top=7·bottom=184.4(측정값), y축 min~max. 라벨은 점보다 살짝 위·플롯 안으로 clamp.
+    // 끝점 세로 위치(%): 차트 400x232, 플롯영역 top=7·bottom=184.4(측정값), y축 min~yMax(상단 헤드룸).
+    // sparkUrl 과 동일한 fill 규칙으로 스케일을 맞춰야 라벨이 (헤드룸만큼 내려온) 선 끝점 바로 위에 앉는다.
     const lblTop = v => {
-      const lo = Math.min(...sp), hi = Math.max(...sp), span = (hi - lo) || 1;
-      const yf = (7 + (hi - v) / span * (184.4 - 7)) / 232;
+      let lo = Math.min(...sp), hi = Math.max(...sp);
+      const peakRight = sp[sp.length - 1] === hi;   // 우측 끝이 최고점이면 헤드룸을 더 줘(65%) 값 라벨을 그래프 위쪽으로 이동
+      if (hi === lo) { const e = (Math.abs(lo) || 1) * 0.02; lo -= e; hi += e; }
+      const fill = peakRight ? 0.65 : 0.70;
+      const yMax = lo + (hi - lo) / fill;
+      const yf = (7 + (yMax - v) / (yMax - lo) * (184.4 - 7)) / 232;
       return (Math.max(0, Math.min(0.78, yf - 0.14)) * 100).toFixed(1);
     };
     const lS = `position:absolute;font-size:12px;font-weight:700;color:${T.muted};font-variant-numeric:tabular-nums;background:rgba(255,255,255,.72);padding:0 2px;white-space:nowrap;line-height:1.2`;
