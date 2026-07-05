@@ -1168,11 +1168,11 @@ export function renderEmail(data, opts = {}) {
     ? data.ideas.map(i => {
         const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:14px;font-weight:600;color:${T.text}">💡 ${esc(i.title)}</span>${memo}</div>`;
+          <span style="font-size:14px;font-weight:600;color:${T.text}">• ${esc(i.title)}</span>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
-    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">📄 ${esc(r.title)}
+    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">• ${esc(r.title)}
         <span style="font-size:13px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
 
@@ -1199,11 +1199,11 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
-    ${section("원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
-    ${section("가전 주요뉴스", newsRows, "", false, sm.sec.news)}
-    ${section("아이디어 뱅크", ideaRows)}
-    ${section("보고서", reportRows)}
+    ${section("🛒 소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
+    ${section("💰 원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
+    ${section("📰 가전 주요뉴스", newsRows, "", false, sm.sec.news)}
+    ${section("💡 아이디어 뱅크", ideaRows)}
+    ${section("📄 보고서", reportRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
