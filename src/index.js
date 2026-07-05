@@ -16,6 +16,8 @@
 import { SCFI_SEED } from "./scfi-seed.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
+const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지(항목별 딥링크 미지원 → 뱅크로 연결)
+const REPORT_BASE = "https://samsungda.net/research/";      // 보고서 파일: /research/<R2 key> 로 항목별 연결
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
