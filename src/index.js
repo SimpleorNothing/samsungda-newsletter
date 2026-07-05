@@ -855,7 +855,7 @@ async function getIdeas(env) {
     } while (cursor);
   } catch { return []; }
   items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return items.slice(0, 5);
+  return items.slice(0, 30);
 }
 async function getReports(env) {
   if (!env.RESEARCH) return [];
@@ -863,9 +863,9 @@ async function getReports(env) {
     const listed = await env.RESEARCH.list({ include: ["customMetadata", "httpMetadata"] });
     return (listed.objects || [])
       .filter(o => !o.key.startsWith(BANK_PREFIX) && !o.key.startsWith(NL_PREFIX) && !o.key.startsWith(SUB_PREFIX) && !o.key.startsWith("signals/"))
-      .map(o => ({ id: o.key, title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded }))
+      .map(o => ({ title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded, key: o.key }))
       .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
-      .slice(0, 5);
+      .slice(0, 30);
   } catch { return []; }
 }
 function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s; } }
@@ -951,8 +951,8 @@ async function aiSummary(env, data) {
             "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
-            "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
-            "  · threat: 당사(DA) 위협 — 이 소식이 가하는 위협 요인(경쟁 심화·원가 상승·규제·수요 둔화 관점) 한 문장(60자 이내). 위협 요인이 불분명하면 빈 문자열.",
+            "  · opportunity: 당사(DA) 기회 — 반드시 '당사는'으로 시작해 당사의 현황·강점·포지션을 짚고, '이는 ~~~ 당사에게도 기회'(또는 '…당사에도 기회 요인') 형태로 마무리하는 한 문장(80자 이내). 수요·원가·제품 포트폴리오·역외 거점 관점의 기회 요인을 소식 내용에 맞춰 자연스러운 워딩으로 담는다. 기회 요인이 불분명하면 빈 문자열.",
+            "  · threat: 당사(DA) 위협 — 반드시 '반면'으로 시작해 경쟁사·시장·정책의 움직임을 짚고, '~~~ 경쟁 심화'(또는 '…원가 부담·수요 둔화 심화') 등 당사에 가해지는 위협으로 마무리하는 한 문장(80자 이내). 경쟁 심화·원가 상승·규제·수요 둔화 관점의 위협 요인을 소식 내용에 맞춰 자연스러운 워딩으로 담는다. 위협 요인이 불분명하면 빈 문자열.",
             "  · 세 필드 모두 사실·방향 서술만 담는다. '검토 필요'·'대응해야'·'추진 여지' 等 실행 제안·액션 권고 금지 (실행 판단은 사람의 몫).",
             "  · 헤드라인·요약에 없는 사실·수치 창작 금지. content는 항상, opportunity·threat는 근거가 있을 때만 채운다.",
             "- 환율 해석 원칙 (원가 관점 전용 — 매출·수출 채산성 언급 금지):",
@@ -1005,6 +1005,8 @@ export function renderEmail(data, opts = {}) {
   const mom = q => q ? chg(q.price, q.prevMonth) : "";   // 원가: 1개월전 대비(MoM)
   const dchg = q => q ? chg(q.price, q.prevDay) : "";     // 일간: 전일 대비
   const fmt = (n, d = 2) => n == null ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  // 추이 값 표기 규칙: |v|>=10 → 정수, 그 외 → 소수 1자리.
+  const fmtVal = v => v == null ? "—" : (Math.abs(v) >= 10 ? Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) : Number(v).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
   const line = html => `<div style="padding:4px 0;font-size:14px;color:${T.text};line-height:1.55">• ${html}</div>`;
   const lbl = t => `<span style="color:${T.muted}">${t}</span>`;
   const dot = ' <span style="color:' + T.border + '">·</span> ';
@@ -1048,7 +1050,7 @@ export function renderEmail(data, opts = {}) {
     };
     // 그라데이션: QuickChart 내장 헬퍼(v4 지원·확실히 렌더). 3-스톱으로 상단 진함→중간 옅음→바닥 완전 투명(TradingView풍).
     const json = JSON.stringify(c).replace('"__GRAD__"', `getGradientFillHelper('vertical', ['${rgba(lineCol, 0.42)}','${rgba(lineCol, 0.08)}','${rgba(lineCol, 0)}'])`);
-    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(json);
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=232&c=" + encodeURIComponent(json);
   };
   // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
   const ymLabel = s => { if (!s) return ""; const p = String(s).slice(0, 7).split("-"); return p.length < 2 ? "" : `'${p[0].slice(2)}.${parseInt(p[1], 10)}`; };
@@ -1069,21 +1071,21 @@ export function renderEmail(data, opts = {}) {
     const sp = qi && qi.spark;
     const ready = !!(sp && sp.length >= 4);
     const ax = ready ? { m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date) } : null;
-    // 끝점 세로 위치(%): 차트 400x332, 플롯영역 top=7·bottom=284.4(측정값), y축 min~max. 라벨은 점보다 살짝 위·플롯 안으로 clamp.
+    // 끝점 세로 위치(%): 차트 400x232, 플롯영역 top=7·bottom=184.4(측정값), y축 min~max. 라벨은 점보다 살짝 위·플롯 안으로 clamp.
     const lblTop = v => {
       const lo = Math.min(...sp), hi = Math.max(...sp), span = (hi - lo) || 1;
-      const yf = (7 + (hi - v) / span * (284.4 - 7)) / 332;
-      return (Math.max(0, Math.min(0.80, yf - 0.12)) * 100).toFixed(1);
+      const yf = (7 + (hi - v) / span * (184.4 - 7)) / 232;
+      return (Math.max(0, Math.min(0.78, yf - 0.14)) * 100).toFixed(1);
     };
     const lS = `position:absolute;font-size:12px;font-weight:700;color:${T.muted};font-variant-numeric:tabular-nums;background:rgba(255,255,255,.72);padding:0 2px;white-space:nowrap;line-height:1.2`;
     const url = qi ? sparkUrl(qi.spark, dirBase, good, ax) : "";
     const img = url
       ? `<div style="position:relative;width:100%;max-width:200px;margin:2px 0 4px">
-          <img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;height:auto">
+          <img src="${url}" width="400" height="232" alt="" style="display:block;width:100%;height:auto">
           <span style="${lS};top:${ready ? lblTop(sp[0]) : "0"}%;left:2%">${ready ? fvt(sp[0]) : ""}</span>
           <span style="${lS};top:${ready ? lblTop(sp[sp.length - 1]) : "0"}%;right:2%">${ready ? fvt(sp[sp.length - 1]) : ""}</span>
         </div>`
-      : `<div style="height:150px;margin:2px 0 4px"></div>`;
+      : `<div style="height:105px;margin:2px 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
@@ -1108,21 +1110,21 @@ export function renderEmail(data, opts = {}) {
   const scfiT = (s && s.scfi && s.scfi.trend) || null;
   const scfiPx = (s && s.scfi && s.scfi.value != null) ? s.scfi.value : null;
   const consumeTrend = trendStrip([
-    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp", fvt: v => `${fmt(v, 1)}%` }),
-    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fvt: v => `${fmt(v)}%` }),
-    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true, fvt: v => `${fmt(v / 1e6, 2)}M` }),
+    trendCell("美 CPI (YoY)", `${fmtVal(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null))}${uPct}`, cpiT, { delta: "pp", fvt: v => `${fmtVal(v)}%` }),
+    trendCell("美 10Y 금리", `${fmtVal(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fvt: v => `${fmtVal(v)}%` }),
+    trendCell("기존주택 거래", `${fmtVal(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null))}${uM}`, exhT, { good: true, fvt: v => `${fmtVal(v / 1e6)}M` }),
   ].join(""));
   const scfiCell = scfiT
-    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT, { fvt: v => `${fmt(v, 0)}p` })
+    ? trendCell("SCFI 운임", `${fmtVal(scfiPx)}${uP}`, scfiT, { fvt: v => `${fmtVal(v)}p` })
     : `<td width="33%" style="padding:16px 10px;vertical-align:top">
         <div style="font-size:13px;color:${T.muted};font-weight:600">SCFI 운임</div>
         <div style="height:84px;margin:8px 0 6px"></div>
-        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmt(scfiPx, 0) + uP : "—"}</div>
+        <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmtVal(scfiPx) + uP : "—"}</div>
         <div style="font-size:13px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
       </td>`;
   const costTrend = trendStrip([
-    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fvt: v => `$${fmt(v)}` }),
-    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT, { fvt: v => fmt(v, 1) }),
+    trendCell("WTI 유가", `$${fmtVal(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fvt: v => `$${fmtVal(v)}` }),
+    trendCell("철강 (PPI)", `${fmtVal(steelT ? steelT.price : (m.steel ? m.steel.val : null))}`, steelT, { fvt: v => `${fmtVal(v)}` }),
     scfiCell,
   ].join(""));
 
@@ -1164,8 +1166,8 @@ export function renderEmail(data, opts = {}) {
   const newsWhyRows = w => {
     if (!w) return "";
     const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : w;
-    const row = (label, text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="background:linear-gradient(transparent 58%, ${rgba(color, 0.28)} 58%);color:${T.text};font-weight:700;padding:0 2px">${label}</span> ${esc(text)}</div>` : "";
-    return row("내용", o.content, T.text) + row("기회", o.opportunity, T.brand) + row("위협", o.threat, T.up);
+    const row = (text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="color:${color};font-weight:700;padding:0 3px 0 0">•</span>${esc(text)}</div>` : "";
+    return row(o.content, T.text) + row(o.opportunity, T.brand) + row(o.threat, T.up);
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
@@ -1183,17 +1185,19 @@ export function renderEmail(data, opts = {}) {
         </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
-  const ideaRows = data.ideas.length
-    ? data.ideas.map(i => {
-        const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
-        return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <a href="${IDEA_URL}" target="_blank" rel="noopener" style="font-size:14px;font-weight:600;color:${T.text};text-decoration:none">• ${esc(i.title)}</a>${memo}</div>`;
-      }).join("")
-    : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
-  const reportRows = data.reports.length
-    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}"><a href="${REPORT_BASE}${esc(encodeURIComponent(r.id))}" target="_blank" rel="noopener" style="color:${T.text};text-decoration:none">• ${esc(r.title)}</a>
-        <span style="font-size:13px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
-    : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
+  // New 아이디어/보고서 — 아이디어 뱅크 + 보고서 통합, 발송일 기준 지난 1주 내 신규 생성분만.
+  // 파일명 _YYMMDDHHMM…(연월일+시분+메타) → _연월일(YYMMDD)까지만 노출.
+  const reportTitle = t => t.replace(/(_\d{6})\d{4}(?:_.*)?$/, "$1");
+  const freshCutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  const newItems = [
+    ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: "https://idea.samsungda.net/", ts: i.createdAt || 0 })),
+    ...data.reports.map(r => ({ kind: "보고서", title: reportTitle(r.title || ""), url: r.key ? "https://samsungda.net/research/" + encodeURIComponent(r.key) : "", ts: r.uploaded ? new Date(r.uploaded).getTime() : 0 })),
+  ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 12);
+  const newTag = kind => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-right:7px;vertical-align:middle;line-height:1.6">${kind}</span>`;
+  const newRows = newItems.length
+    ? newItems.map(x => `<div style="padding:7px 0;border-bottom:1px solid ${T.border}">
+        <a href="${esc(x.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newTag(x.kind)}${esc(x.title)}</a></div>`).join("")
+    : `<div style="font-size:13px;color:${T.muted}">지난 1주 신규 아이디어·보고서 없음</div>`;
 
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
@@ -1221,8 +1225,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${section("🛒 소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
     ${section("💰 원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
     ${section("📰 가전 주요뉴스", newsRows, "", false, sm.sec.news)}
-    ${section("💡 아이디어 뱅크", ideaRows)}
-    ${section("📄 보고서", reportRows)}
+    ${section("🆕 New 아이디어/보고서", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
