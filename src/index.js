@@ -369,6 +369,7 @@ async function gatherData(env) {
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
   const news = (newsPool || []).slice(0, 5);
+  await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports };
   data.signals = analyzeSignals(sigHist, data);
   // SCFI 6개월 추이: 누적 스냅샷(history)의 scfi 시계열 + 오늘치 → 추이셀. 데이터 얕으면 null(자리표시자).
@@ -682,6 +683,26 @@ async function getNews() {
     return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 slice)
   } catch { return []; }
 }
+
+// 기사 원문 og:image 추출 — 표시용 뉴스에만 사용. 실패 시 빈 문자열(무이미지 폴백).
+async function fetchOgImage(url) {
+  if (!url) return "";
+  try {
+    const res = await fetch(url, { headers: UA.headers, redirect: "follow", signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return "";
+    if (!(res.headers.get("content-type") || "").includes("text/html")) return "";
+    const html = (await res.text()).slice(0, 80000);
+    const pick = re => { const m = html.match(re); return m ? m[1].trim() : ""; };
+    let img =
+      pick(/<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]+content=["']([^"']+)["']/i) ||
+      pick(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url|:url)?["']/i) ||
+      pick(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i) ||
+      pick(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i);
+    if (!img) return "";
+    try { img = new URL(img.replace(/&amp;/g, "&"), url).href; } catch { return ""; }
+    return /^https:\/\//i.test(img) ? img : ""; // 이메일 클라이언트 https만 허용
+  } catch { return ""; }
+}
 async function getIdeas(env) {
   const items = [];
   if (!env.RESEARCH) return items;
@@ -765,7 +786,7 @@ function ruleSummary(data) {
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 6개월 추이 기준 원가·소비 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
-  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "" }, newsWhy: {} };
+  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "", news: "" }, newsWhy: {} };
 }
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
@@ -784,13 +805,13 @@ async function aiSummary(env, data) {
             "삼성전자 생활가전(DA) 기획자를 위한 데일리 브리핑을 쓴다.",
             "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
-            '{"hero":"...","consume":"...","cost":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
-            "- 해석 기준(최우선): hero·consume·cost의 방향과 의미는 6개월 추이를 1차 기준으로 삼는다. 시장지표(환율·유가·구리·철강·금리·홈빌더ETF·美CPI·기존주택)는 데이터에 '6개월' 델타가 병기돼 있으니 그 방향으로 큰 그림을 서술하고, '최근 전일/전월'은 단기 가속·되돌림을 짚을 때만 보조로 쓴다. 하루 등락으로 6개월 방향을 뒤집어 서술하지 않는다. 유럽·한국 CPI·소비심리·주간지표·운임(SCFI/FBX)은 발표주기 특성상 전년/전월/전주 델타를 그대로 쓴다.",
-            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 방향·의미는 6개월 추이를 기준으로 잡고 인과 고리를 6개월 델타와 함께 드러낸다(예: '원/달러 6개월 +6%로 수입 부품 원가 부담이 누적된 가운데…'). 최근 전일/전월은 단기 가속·되돌림일 때만 덧붙인다.",
-            "- consume: 소비 환경(CPI·금리·기존주택·홈빌더ETF·물가·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 美CPI·10Y·기존주택·홈빌더ETF는 6개월 추이 방향으로, 유럽·한국 CPI·심리는 발표주기 델타로 해석. 예: '인플레 둔화에도 고금리·주택 부진에 교체 수요 회복 지연 (美CPI 6M ▼0.5%p·10Y 6M +18bp·기존주택 6M ▼2.5%)'.",
-            "  · 소비 방향은 시장 프록시의 6개월 추이(美CPI YoY·10Y·기존주택·홈빌더ETF ITB)를 우선 근거로 서술하고, 주간 지표(신규 실업수당청구·30Y 모기지 전주)로 보완한다.",
+            '{"hero":"...","consume":"...","cost":"...","newsSummary":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
+            "- hero: 아래 세 섹션(소비·원가·뉴스)을 하나로 아우르는 최상위 맥락 브리핑 2~3문장(전체 200자 이내). 세 축을 각각 최소 한 번씩 짚되 단순 나열이 아니라 소비 수요·원가 여건·경쟁 뉴스가 오늘 DA 기획에 어떤 종합 그림을 그리는지 인과로 엮는다. 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
+            "- consume: 소비 환경(금리·수요ETF·주간지표·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
+            "  · 물가·주택·심리가 월간이라 당일 신선한 델타가 없으면, 일간 프록시(10Y 전일·홈빌더ETF ITB 전일·소비재ETF XLY 전일)나 주간 지표(신규 실업수당청구·30Y 모기지 전주)를 근거로 소비 방향을 서술한다. 매일 최소 하나의 신선 신호를 담는다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
-            "- cost: 원가 환경(유가·철강·원자재·환율·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 유가·철강·구리·환율은 6개월 추이 방향으로 해석하고 괄호에 6개월 델타 병기(예: 'WTI 6M +18%·철강 6M +6%·원/달러 6M +6%'). 운임은 발표주기 특성상 SCFI/FBX 전주比로 서술 — SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임.",
+            "- cost: 원가 환경(환율·유가·원자재·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임 — 둘 다 수출 물류비 방향 신호로 해석.",
+            "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
             "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
@@ -830,7 +851,7 @@ async function aiSummary(env, data) {
         const hero = str(parsed.hero, 280);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120) },
+          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120), news: str(parsed.newsSummary, 120) },
           newsWhy,
         };
       }
@@ -976,10 +997,15 @@ export function renderEmail(data, opts = {}) {
         const axBadges = (i.competitors || []).includes("LG전자")
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
-        return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
+        const thumb = i.image
+          ? `<td width="92" valign="top" style="padding:8px 0 8px 12px;width:92px"><a href="${esc(i.url)}" style="text-decoration:none"><img src="${esc(i.image)}" width="92" height="72" alt="" style="display:block;width:92px;height:72px;object-fit:cover;border:1px solid ${T.border};background:${T.bg}"></a></td>`
+          : "";
+        return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
+        <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></div>`;
+        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
+        </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
@@ -1019,9 +1045,9 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       </div>
     </td></tr>
     ${sigStrip}
-    ${section("소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
-    ${section("원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
-    ${section("가전 주요뉴스", newsRows)}
+    ${section("소비", consumeTrend + consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
+    ${section("원가", costTrend + cost, "환율·유가 전일 · 운임 전주 · 원자재 전월", false, sm.sec.cost)}
+    ${section("가전 주요뉴스", newsRows, "", false, sm.sec.news)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
