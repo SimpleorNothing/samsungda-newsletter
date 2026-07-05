@@ -1179,12 +1179,13 @@ export function renderEmail(data, opts = {}) {
     ? data.ideas.map(i => {
         const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:14px;font-weight:600;color:${T.text}">• ${esc(i.title)}</span>${memo}</div>`;
+          <span style="font-size:14px;font-weight:400;color:${T.text}">• ${esc(i.title)}</span>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
+  // 파일명 _YYMMDDHHMM…(연월일+시분+메타) → _연월일(YYMMDD)까지만 노출
+  const reportTitle = t => t.replace(/(_\d{6})\d{4}(?:_.*)?$/, "$1");
   const reportRows = data.reports.length
-    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">• ${esc(r.title)}
-        <span style="font-size:13px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
+    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">• ${esc(reportTitle(r.title))}</div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
 
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
