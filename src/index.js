@@ -729,7 +729,7 @@ function ruleSummary(data) {
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 원가·소비 지표 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
-  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "" }, newsWhy: {} };
+  return { hero: `${macro}. ${news}`, sec: { consume: "", cost: "", news: "" }, newsWhy: {} };
 }
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
@@ -748,12 +748,13 @@ async function aiSummary(env, data) {
             "삼성전자 생활가전(DA) 기획자를 위한 데일리 브리핑을 쓴다.",
             "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
             "아래 JSON 스키마 한 덩어리로만 답한다 (코드펜스·설명·인사말 금지):",
-            '{"hero":"...","consume":"...","cost":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
-            "- hero: 오늘 지표·뉴스를 관통하는 맥락 브리핑 2~3문장(전체 200자 이내). 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
+            '{"hero":"...","consume":"...","cost":"...","newsSummary":"...","news":[{"idx":0,"content":"...","opportunity":"...","threat":"..."}]}',
+            "- hero: 아래 세 섹션(소비·원가·뉴스)을 하나로 아우르는 최상위 맥락 브리핑 2~3문장(전체 200자 이내). 세 축을 각각 최소 한 번씩 짚되 단순 나열이 아니라 소비 수요·원가 여건·경쟁 뉴스가 오늘 DA 기획에 어떤 종합 그림을 그리는지 인과로 엮는다. 인과 고리를 수치와 함께 문장 안에 드러낸다(예: '원/달러 +0.4%로 수입 부품 원가 압력이 커진 가운데…').",
             "- consume: 소비 환경(금리·수요ETF·주간지표·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
             "  · 물가·주택·심리가 월간이라 당일 신선한 델타가 없으면, 일간 프록시(10Y 전일·홈빌더ETF ITB 전일·소비재ETF XLY 전일)나 주간 지표(신규 실업수당청구·30Y 모기지 전주)를 근거로 소비 방향을 서술한다. 매일 최소 하나의 신선 신호를 담는다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
             "- cost: 원가 환경(환율·유가·원자재·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임 — 둘 다 수출 물류비 방향 신호로 해석.",
+            "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
             "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
@@ -792,7 +793,7 @@ async function aiSummary(env, data) {
         const hero = str(parsed.hero, 280);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120) },
+          sec: { consume: str(parsed.consume, 120), cost: str(parsed.cost, 120), news: str(parsed.newsSummary, 120) },
           newsWhy,
         };
       }
@@ -984,7 +985,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${sigStrip}
     ${section("소비", consumeTrend + consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
     ${section("원가", costTrend + cost, "환율·유가 전일 · 운임 전주 · 원자재 전월", false, sm.sec.cost)}
-    ${section("가전 주요뉴스", newsRows)}
+    ${section("가전 주요뉴스", newsRows, "", false, sm.sec.news)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
