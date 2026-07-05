@@ -432,7 +432,7 @@ async function archivePage(env) {
 body{font-family:"Pretendard",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;background:var(--bg);color:var(--ink);padding:56px 20px;line-height:1.6}
 .wrap{max-width:620px;margin:0 auto}
 header{position:relative;border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:24px}
-.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--brand);margin-bottom:8px}
+.eyebrow{font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--brand);margin-bottom:8px}
 h1{font-size:28px;font-weight:800;letter-spacing:-.5px}
 .sub{font-size:14px;color:var(--muted);margin-top:8px}
 .subscribe{margin-top:28px}
@@ -458,9 +458,9 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 .tools:hover{color:var(--ink)}
 .tools svg{width:15px;height:15px;flex:0 0 auto}
 .foot{position:relative;margin-top:32px;padding-top:16px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start}
-.upd{font:inherit;font-size:12px;color:var(--muted);background:none;border:none;padding:0;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+.upd{font:inherit;font-size:13px;color:var(--muted);background:none;border:none;padding:0;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
 .upd:hover{color:var(--ink)}
-.upd .cev{font-size:10px;transition:transform .15s}
+.upd .cev{font-size:13px;transition:transform .15s}
 .upd.open .cev{transform:rotate(180deg)}
 .log{position:absolute;left:0;bottom:calc(100% + 10px);width:340px;max-width:80vw;max-height:52vh;overflow:auto;background:var(--surface);border:1px solid var(--line);box-shadow:0 12px 28px rgba(23,34,45,.16);padding:14px 14px 8px;z-index:50;display:none;animation:logrise .14s ease-out}
 .log.open{display:block}
@@ -960,21 +960,21 @@ export function renderEmail(data, opts = {}) {
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:10px 8px;vertical-align:top">
-        <div style="font-size:11px;color:${T.muted};font-weight:600">${label}</div>${img}
+        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
-        <div style="font-size:11px;margin-top:2px">${deltaLine}</div>
+        <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
   };
   const trendStrip = cells => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;border-top:1px solid ${T.border}">
-      <tr><td colspan="3" style="padding:9px 8px 0;font-size:10px;font-weight:800;color:${T.muted};letter-spacing:.1em">6개월 추이</td></tr>
+      <tr><td colspan="3" style="padding:9px 8px 0;font-size:13px;font-weight:800;color:${T.muted};letter-spacing:.1em">6개월 추이</td></tr>
       <tr>${cells}</tr></table>`;
-  const uPct = `<span style="font-size:11px;color:${T.muted}">%</span>`;
-  const uLb = `<span style="font-size:11px;color:${T.muted}">/lb</span>`;
-  const uM = `<span style="font-size:11px;color:${T.muted}">M</span>`;
-  const uP = `<span style="font-size:11px;color:${T.muted}">p</span>`;
+  const uPct = `<span style="font-size:13px;color:${T.muted}">%</span>`;
+  const uLb = `<span style="font-size:13px;color:${T.muted}">/lb</span>`;
+  const uM = `<span style="font-size:13px;color:${T.muted}">M</span>`;
+  const uP = `<span style="font-size:13px;color:${T.muted}">p</span>`;
   // 6M 순변동(비율) 계산 + 불릿용 배지
   const net6 = qi => (qi && qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
-  const badge6 = qi => { const n = net6(qi); return n == null ? "" : ` <span style="color:${n >= 0 ? T.up : T.down};font-weight:600">${n >= 0 ? "▲" : "▼"}${Math.abs(n).toFixed(1)}%</span> <span style="color:${T.muted};font-size:12px">(6M)</span>`; };
+  const badge6 = qi => { const n = net6(qi); return n == null ? "" : ` <span style="color:${n >= 0 ? T.up : T.down};font-weight:600">${n >= 0 ? "▲" : "▼"}${Math.abs(n).toFixed(1)}%</span> <span style="color:${T.muted};font-size:13px">(6M)</span>`; };
   const cpiT = (m.cpiUS && m.cpiUS.trend) || null;
   const exhT = (m.exhome && m.exhome.trend) || null;
   const steelT = (m.steel && m.steel.trend) || null;
@@ -988,10 +988,10 @@ export function renderEmail(data, opts = {}) {
   const scfiCell = scfiT
     ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT)
     : `<td width="33%" style="padding:10px 8px;vertical-align:top">
-        <div style="font-size:11px;color:${T.muted};font-weight:600">SCFI 운임</div>
+        <div style="font-size:13px;color:${T.muted};font-weight:600">SCFI 운임</div>
         <div style="height:42px;margin:6px 0 4px"></div>
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmt(scfiPx, 0) + uP : "—"}</div>
-        <div style="font-size:11px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
+        <div style="font-size:13px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
       </td>`;
   const costTrend = trendStrip([
     trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"]),
@@ -1003,14 +1003,14 @@ export function renderEmail(data, opts = {}) {
   const sigBreaches = (data.signals && data.signals.ready) ? (data.signals.breaches || []) : [];
   const sigStrip = sigBreaches.length ? `<tr><td style="padding:16px 22px 0">
       <div style="background:${T.surface};border:1px solid ${T.border};border-left:3px solid ${T.up};padding:13px 16px">
-        <div style="font-size:10px;font-weight:800;color:${T.up};letter-spacing:.12em">누적 신호 · 주간 임계 돌파</div>
+        <div style="font-size:13px;font-weight:800;color:${T.up};letter-spacing:.12em">누적 신호 · 주간 임계 돌파</div>
         ${sigBreaches.map(b => `<div style="margin-top:7px;font-size:13px;color:${T.text};line-height:1.5"><b style="color:${b.dir >= 0 ? T.up : T.down}">${esc(b.label)}</b> <span style="color:${T.muted}">${esc(b.detail)}</span></div>`).join("")}
       </div></td></tr>` : "";
 
   // 원가 추가지표: 원자재·환율 2줄(성격 라벨 우선). 유가·철강·SCFI는 위 6개월 추이 차트로.
   const matParts = [
     q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${badge6(q["HG=F"])}` : null,
-    m.resin ? `레진 <b>${fmt(m.resin.val, 1)}</b>${m.resin.mom != null ? arrow(m.resin.mom) : ""} <span style="color:${T.muted};font-size:12px">(${m.resin.date})</span>` : null,
+    m.resin ? `레진 <b>${fmt(m.resin.val, 1)}</b>${m.resin.mom != null ? arrow(m.resin.mom) : ""} <span style="color:${T.muted};font-size:13px">(${m.resin.date})</span>` : null,
   ].filter(Boolean).join(dot);
   const fxParts = [
     q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${badge6(q["KRW=X"])}` : null,
@@ -1023,14 +1023,14 @@ export function renderEmail(data, opts = {}) {
   ].join("");
 
   // 소비 추가지표: 물가·수요·심리 3줄(성격 라벨 우선). CPI·금리·기존주택은 위 6개월 추이 차트로.
-  const yoyTxt = st => st && st.yoy != null ? `<b>${st.yoy >= 0 ? "+" : ""}${st.yoy.toFixed(1)}%</b> <span style="color:${T.muted};font-size:12px">(${st.date})</span>` : "<b>—</b>";
+  const yoyTxt = st => st && st.yoy != null ? `<b>${st.yoy >= 0 ? "+" : ""}${st.yoy.toFixed(1)}%</b> <span style="color:${T.muted};font-size:13px">(${st.date})</span>` : "<b>—</b>";
   const consume = [
     (m.cpiEU || m.cpiKR) ? line(`${lbl("물가 :")} ${[
       m.cpiEU ? `유럽 CPI ${yoyTxt(m.cpiEU)}` : null,
       m.cpiKR ? `한국 CPI ${yoyTxt(m.cpiKR)}` : null,
     ].filter(Boolean).join(dot)}`) : "",
     q["ITB"] ? line(`${lbl("수요 :")} 홈빌더 ITB <b>$${fmt(q["ITB"].price)}</b>${badge6(q["ITB"])}`) : "",
-    m.umich ? line(`${lbl("심리 :")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:12px">(${m.umich.date})</span>`) : "",
+    m.umich ? line(`${lbl("심리 :")} 美 소비심리(UMich) <b>${fmt(m.umich.val, 1)}</b>${arrow(m.umich.mom)} <span style="color:${T.muted};font-size:13px">(${m.umich.date})</span>`) : "",
   ].join("");
 
   // 콘텐츠
@@ -1043,7 +1043,7 @@ export function renderEmail(data, opts = {}) {
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
         const axBadges = (i.competitors || []).includes("LG전자")
-          ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:10px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
+          ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:13px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
         const thumb = i.image
           ? `<td width="92" valign="top" style="padding:8px 0 8px 12px;width:92px"><a href="${esc(i.url)}" style="text-decoration:none"><img src="${esc(i.image)}" width="92" height="72" alt="" style="display:block;width:92px;height:72px;object-fit:cover;border:1px solid ${T.border};background:${T.bg}"></a></td>`
@@ -1052,22 +1052,22 @@ export function renderEmail(data, opts = {}) {
         <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
+        <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
         </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
   const ideaRows = data.ideas.length
     ? data.ideas.map(i => {
         const dir = i.dir === "profit" ? "수익" : "매출";
-        const memo = i.memo ? `<div style="margin-top:3px;font-size:12px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
+        const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:11px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
+          <span style="font-size:13px;color:${T.brand};font-weight:700">[${dir}${i.topic ? " · " + esc(i.topic) : ""}]</span>
           <span style="font-size:14px;font-weight:600;color:${T.text}">${esc(i.title)}</span>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
     ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">📄 ${esc(r.title)}
-        <span style="font-size:12px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
+        <span style="font-size:13px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
 
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
@@ -1077,18 +1077,18 @@ export function renderEmail(data, opts = {}) {
   return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"></head>
 <body style="margin:0;padding:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
-${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.text};color:${T.bg};font-size:11px;font-weight:700;letter-spacing:.14em;padding:4px 10px">SAMPLE</div>` : ""}
+${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.text};color:${T.bg};font-size:13px;font-weight:700;letter-spacing:.14em;padding:4px 10px">SAMPLE</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
-      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
-      <div style="margin-top:10px;font-size:11px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 뉴스 · 아이디어 · 보고서</div>
+      <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
+      <div style="margin-top:10px;font-size:13px;color:${T.muted};letter-spacing:.05em">소비 · 원가 · 뉴스 · 아이디어 · 보고서</div>
     </td></tr>
     <tr><td style="padding:18px 22px 2px">
       <div style="background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${T.brand};padding:16px 18px">
-        <div style="font-size:10px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 맥락</div>
+        <div style="font-size:13px;font-weight:800;color:${T.brand};letter-spacing:.12em;text-align:center">오늘의 맥락</div>
         <div style="margin-top:9px;font-size:14px;font-weight:600;color:${T.text};line-height:1.65;text-align:left">${esc(sm.hero)}</div>
       </div>
     </td></tr>
@@ -1099,10 +1099,10 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
-      <div style="font-size:11px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+      <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
   </table>
-  <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
+  <div style="max-width:600px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
     지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 주간 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 누적 축적분 기준.
   </div>
 </td></tr>
@@ -1120,7 +1120,7 @@ function welcomeEmail(pub, unsub) {
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
-      <div style="margin-top:4px;font-size:12px;color:${T.muted};letter-spacing:.04em">SAMSUNG DA 기획 도구모음</div>
+      <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">SAMSUNG DA 기획 도구모음</div>
     </td></tr>
     <tr><td style="padding:28px 22px 24px">
       <div style="font-size:16px;font-weight:700;color:${T.text};line-height:1.6">구독 신청이 완료되었습니다.</div>
@@ -1128,7 +1128,7 @@ function welcomeEmail(pub, unsub) {
       <div style="margin-top:20px"><a href="${latest}" style="display:inline-block;padding:10px 18px;background:${T.brand};color:#fff;font-size:14px;font-weight:700;text-decoration:none">최근 호 보기 →</a></div>
     </td></tr>
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
-      <div style="font-size:11px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="${unsub}" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+      <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="${unsub}" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
   </table>
 </td></tr></table>
