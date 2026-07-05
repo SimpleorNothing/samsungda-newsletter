@@ -1010,9 +1010,10 @@ export function renderEmail(data, opts = {}) {
   const favCol = (v, good) => v == null ? T.muted : ((v >= 0) === !!good ? T.down : T.up);
   // ax = { m0,m1 (양 끝 연월 라벨) }. 연월은 x축 양 끝에 표기. 값(처음/마지막)은 HTML로 그래프 바로 위에 병기(trendCell).
   // 2x 해상도(400x332)로 렌더 → 표시 시 축소해 선명. y축은 데이터 최저~최고로 꽉 채워 저점/고점이 상하 끝에 닿게 함.
+  // 색: 라인·면적 모두 '당사 유불리' 단일색(유리=파랑·불리=빨강). 기준선 위/아래 2색 분할 없이 세로 그라데이션(상단 진함→하단 투명).
   const sparkUrl = (series, net, good, ax) => {
     if (!series || series.length < 4) return "";
-    const ref = series[0], last = series.length - 1;
+    const last = series.length - 1;
     const lineCol = favCol(net, good);
     const m0 = (ax && ax.m0) || "", m1 = (ax && ax.m1) || "";
     let lo = Math.min(...series), hi = Math.max(...series);
@@ -1023,7 +1024,7 @@ export function renderEmail(data, opts = {}) {
         data: series, borderColor: lineCol, borderWidth: 3, tension: 0.28,
         pointRadius: series.map((_, i) => (i === 0 || i === last) ? 4 : 0),
         pointBackgroundColor: lineCol, pointBorderColor: lineCol,
-        fill: { target: { value: ref }, above: rgba(good ? T.down : T.up, 0.15), below: rgba(good ? T.up : T.down, 0.15) },
+        fill: true, backgroundColor: "__GRAD__",
       }] },
       options: {
         plugins: { legend: { display: false } },
@@ -1034,7 +1035,9 @@ export function renderEmail(data, opts = {}) {
         layout: { padding: { top: 14, left: 12, right: 12, bottom: 2 } },
       },
     };
-    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(JSON.stringify(c));
+    // 그라데이션은 QuickChart 헬퍼 표현식이라 함수여야 함 → 문자열 플레이스홀더를 raw 표현식으로 치환.
+    const json = JSON.stringify(c).replace('"__GRAD__"', `getGradientFillHelper('vertical', ['${rgba(lineCol, 0.45)}','${rgba(lineCol, 0)}'])`);
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(json);
   };
   // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
   const ymLabel = s => { if (!s) return ""; const p = String(s).slice(0, 7).split("-"); return p.length < 2 ? "" : `'${p[0].slice(2)}.${parseInt(p[1], 10)}`; };
