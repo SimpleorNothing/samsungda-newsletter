@@ -1008,39 +1008,33 @@ export function renderEmail(data, opts = {}) {
   // Baseline: 지표 성격(good)에 따라 '방향'이 아닌 '당사 유불리'로 채색 — 유리=파란색(T.down)·불리=빨간색(T.up).
   // good=true(수요형: 기존주택 등) 상승이 유리, good=false(원가·금리·물가형) 상승이 불리. 기준선 위/아래 면적도 같은 규칙. Chart.js v4 fill.above/below.
   const favCol = (v, good) => v == null ? T.muted : ((v >= 0) === !!good ? T.down : T.up);
-  // ax = { s0,s1 (양 끝 값 텍스트), m0,m1 (양 끝 연월 라벨) }. 값은 라인 끝점 위에, 연월은 x축 양 끝에 표기.
+  // ax = { m0,m1 (양 끝 연월 라벨) }. 연월은 x축 양 끝에 표기. 값(처음/마지막)은 HTML로 그래프 바로 위에 병기(trendCell).
+  // 2x 해상도(400x332)로 렌더 → 표시 시 축소해 선명. y축은 데이터 최저~최고로 꽉 채워 저점/고점이 상하 끝에 닿게 함.
   const sparkUrl = (series, net, good, ax) => {
     if (!series || series.length < 4) return "";
     const ref = series[0], last = series.length - 1;
     const lineCol = favCol(net, good);
     const m0 = (ax && ax.m0) || "", m1 = (ax && ax.m1) || "";
-    const hasVals = !!(ax && (ax.s0 || ax.s1));
-    const ds = {
-      data: series, borderColor: lineCol, borderWidth: 2, tension: 0.28,
-      pointRadius: series.map((_, i) => (i === 0 || i === last) ? 3 : 0),
-      pointBackgroundColor: lineCol, pointBorderColor: lineCol,
-      fill: { target: { value: ref }, above: rgba(good ? T.down : T.up, 0.15), below: rgba(good ? T.up : T.down, 0.15) },
-    };
-    if (hasVals) ds.datalabels = { color: T.muted, font: { size: 11, weight: "bold" }, clip: false, anchor: "end", align: "top", offset: 3, formatter: "__FMT__" };
-    else ds.datalabels = { display: false };
+    let lo = Math.min(...series), hi = Math.max(...series);
+    if (hi === lo) { const e = (Math.abs(lo) || 1) * 0.02; lo -= e; hi += e; }   // 평평한 시리즈 폴백
     const c = {
       type: "line",
-      data: { labels: series.map((_, i) => i === 0 ? m0 : (i === last ? m1 : "")), datasets: [ds] },
+      data: { labels: series.map((_, i) => i === 0 ? m0 : (i === last ? m1 : "")), datasets: [{
+        data: series, borderColor: lineCol, borderWidth: 3, tension: 0.28,
+        pointRadius: series.map((_, i) => (i === 0 || i === last) ? 4 : 0),
+        pointBackgroundColor: lineCol, pointBorderColor: lineCol,
+        fill: { target: { value: ref }, above: rgba(good ? T.down : T.up, 0.15), below: rgba(good ? T.up : T.down, 0.15) },
+      }] },
       options: {
         plugins: { legend: { display: false } },
         scales: {
-          x: { display: true, grid: { display: false, drawTicks: false }, border: { display: false }, ticks: { color: T.muted, font: { size: 10 }, autoSkip: false, maxRotation: 0, align: "inner", padding: 2 } },
-          y: { display: false, grace: "26%" },
+          x: { display: true, grid: { display: false, drawTicks: false }, border: { display: false }, ticks: { color: T.muted, font: { size: 28 }, autoSkip: false, maxRotation: 0, align: "inner", padding: 6 } },
+          y: { display: false, min: lo, max: hi },   // 저점=하단·고점=상단 (grace 없이 꽉 채움)
         },
-        layout: { padding: { top: 16, left: 6, right: 6, bottom: 0 } },
+        layout: { padding: { top: 14, left: 12, right: 12, bottom: 2 } },
       },
     };
-    let json = JSON.stringify(c);
-    if (hasVals) {   // datalabels.formatter 는 함수여야 하므로 값 텍스트를 구운 함수 리터럴로 치환(QuickChart 함수 파싱).
-      const q = t => String(t == null ? "" : t).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-      json = json.replace('"__FMT__"', `function(v,ctx){var n=ctx.dataset.data.length-1;if(ctx.dataIndex===0)return '${q(ax.s0)}';if(ctx.dataIndex===n)return '${q(ax.s1)}';return null;}`);
-    }
-    return "https://quickchart.io/chart?bkg=transparent&v=4&w=264&h=110&c=" + encodeURIComponent(json);
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=400&h=332&c=" + encodeURIComponent(JSON.stringify(c));
   };
   // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
   const ymLabel = s => { if (!s) return ""; const p = String(s).slice(0, 7).split("-"); return p.length < 2 ? "" : `'${p[0].slice(2)}.${parseInt(p[1], 10)}`; };
@@ -1056,19 +1050,22 @@ export function renderEmail(data, opts = {}) {
     else if (mode === "bp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.round(Math.abs(abs) * 100)}bp`; }
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = favCol(dirBase, good);
-    // 그래프 양 끝점 위=값(처음=6개월 전·마지막=현재), x축 양 끝=연월. 값은 그리는 라인 끝점과 정확히 일치시키려 spark 끝값 사용.
-    const fvt = (opts && opts.fvt) || (v => fmt(v));   // 차트에 굽는 플레인 텍스트 포맷터(HTML 아님)
+    // x축 양 끝=연월. 값(처음/마지막)은 그래프 바로 위 HTML 좌·우로 병기 — 그리는 라인 끝점과 일치하도록 spark 끝값 사용.
+    const fvt = (opts && opts.fvt) || (v => fmt(v));
     const sp = qi && qi.spark;
-    const ax = (sp && sp.length >= 4) ? {
-      s0: fvt(sp[0]), s1: fvt(sp[sp.length - 1]),
-      m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date),
-    } : null;
+    const ready = !!(sp && sp.length >= 4);
+    const ax = ready ? { m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date) } : null;
+    const vals = ready
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:200px;margin:6px 0 0;font-size:12px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
+          <td align="left" style="color:${T.muted}">${fvt(sp[0])}</td>
+          <td align="right" style="color:${T.muted}">${fvt(sp[sp.length - 1])}</td></tr></table>`
+      : "";
     const url = qi ? sparkUrl(qi.spark, dirBase, good, ax) : "";
-    const img = url ? `<img src="${url}" width="264" height="110" alt="" style="display:block;width:100%;max-width:200px;height:auto;margin:6px 0 4px">` : `<div style="height:110px;margin:6px 0 4px"></div>`;
+    const img = url ? `<img src="${url}" width="400" height="332" alt="" style="display:block;width:100%;max-width:200px;height:auto;margin:2px 0 4px">` : `<div style="height:150px;margin:2px 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
-        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}
+        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${vals}${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
         <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
