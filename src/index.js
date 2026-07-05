@@ -5,7 +5,7 @@
 //         · 운임 SCFI/FBX(주간, web_search 자동 캐시 + R2 override), 그래프 아래 추가지표는 성격 라벨 우선 최대 3줄
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
-// 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED CSV(무키 월간지표)·R2 samsungda-research.
+// 데이터: Yahoo(range=6mo → 전일·1개월전·6M추이 스파크라인)·FRED API(+R2 캐시 폴백)·R2 samsungda-research.
 // 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 맥락'(지표·뉴스를 연결한 2~3문장)
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
@@ -20,6 +20,7 @@ const SUB_PREFIX = "subscribers/";
 const FBX_KEY = "signals/fbx.json";  // 운임지수 캐시(SCFI 종합·FBX Global) — web_search 주간 자동 갱신 + 수동 override
 const SIG_KEY = "signals/history.json";        // 일별 지표 스냅샷 누적(최대 90일) — 누적 신호 감지용
 const CI_CAND_KEY = "signals/ci-candidates.json"; // LG 전략축 관련 뉴스 스테이징(CI 센싱 inbox 후보, 사람 검토)
+const FRED_CACHE_PREFIX = "signals/fred/"; // FRED 공식 API 성공 응답 캐시(일시 실패 시 직전 성공값 사용)
 const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
 const GRADE_W = { "긴급": 3, "주요": 2, "주시": 1, "참고": 0 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -360,7 +361,7 @@ async function gatherData(env) {
   const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
   const [yq, macro, freight, newsPool, ideas, reports, sigHist] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
-    getMacro(),
+    getMacro(env),
     getFreight(env),
     getNews(),
     getIdeas(env),
@@ -560,9 +561,49 @@ async function yahoo(sym) {
   } catch { return null; }
 }
 
-// FRED 무키 CSV → 월별 [{d,v}] 오름차순
-async function fred(id, months = 15) {
+function fredCacheKey(id) { return `${FRED_CACHE_PREFIX}${id}.json`; }
+function parseFredRows(raw) {
+  return (raw || [])
+    .map(r => ({ d: r.date || r.d, v: parseFloat(r.value != null ? r.value : r.v) }))
+    .filter(r => r.d && !isNaN(r.v));
+}
+async function loadFredCache(env, id) {
+  if (!env.RESEARCH) return [];
+  try {
+    const o = await env.RESEARCH.get(fredCacheKey(id));
+    if (!o) return [];
+    const j = await o.json();
+    return parseFredRows(j.rows);
+  } catch { return []; }
+}
+async function saveFredCache(env, id, rows) {
+  if (!env.RESEARCH || !rows.length) return;
+  try {
+    await env.RESEARCH.put(fredCacheKey(id), JSON.stringify({ id, rows, updatedAt: Date.now(), source: "fred-api" }), {
+      httpMetadata: { contentType: "application/json" },
+    });
+  } catch { /* 캐시 실패는 무시 */ }
+}
+// FRED 공식 API → 월별/주별 [{d,v}] 오름차순. 실패하면 R2 직전 성공 캐시, 마지막으로 레거시 CSV 폴백.
+async function fred(env, id, months = 15) {
   const cosd = new Date(Date.now() - months * 31 * DAY).toISOString().slice(0, 10);
+  if (env.FRED_API_KEY) {
+    const u = `https://api.stlouisfed.org/fred/series/observations?series_id=${encodeURIComponent(id)}&api_key=${encodeURIComponent(env.FRED_API_KEY)}&file_type=json&observation_start=${cosd}&sort_order=asc`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(u, UA);
+        if (!res.ok) continue;
+        const j = await res.json();
+        const rows = parseFredRows(j.observations);
+        if (rows.length) {
+          await saveFredCache(env, id, rows);
+          return rows;
+        }
+      } catch { /* retry once */ }
+    }
+  }
+  const cached = await loadFredCache(env, id);
+  if (cached.length) return cached;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${cosd}`, UA);
@@ -601,11 +642,11 @@ function fredTrend(rows, yoy) {
   else vals = rows.map(r => r.v);
   return seriesTrend(vals);
 }
-async function getMacro() {
+async function getMacro(env) {
   const mIds = Object.values(FRED), wIds = Object.values(FRED_WEEKLY);
   const [mRows, wRows] = await Promise.all([
-    Promise.all(mIds.map(id => fred(id, 30))),  // 월간: 30개월이면 CPI 전년비 6개월 추이 시계열 확보
-    Promise.all(wIds.map(id => fred(id, 3))),   // 주간: 최근 3개월이면 전주 델타 확보
+    Promise.all(mIds.map(id => fred(env, id, 30))),  // 월간: 30개월이면 CPI 전년비 6개월 추이 시계열 확보
+    Promise.all(wIds.map(id => fred(env, id, 3))),   // 주간: 최근 3개월이면 전주 델타 확보
   ]);
   const s = {}, rowsByKey = {};
   Object.keys(FRED).forEach((k, i) => { s[k] = fredStat(mRows[i]); rowsByKey[k] = mRows[i]; });

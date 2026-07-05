@@ -26,8 +26,10 @@
    wrangler secret put RESEND_API_KEY   # re_...
    wrangler secret put RECIPIENTS       # a@x.com,b@y.com (쉼표구분)
    wrangler secret put TRIGGER_KEY      # (선택) /send 보호용 임의 문자열
+   wrangler secret put FRED_API_KEY     # FRED 공식 API 키 (CPI·주택·철강 등 거시지표)
    ```
-4. **발신 주소**: `wrangler.jsonc`의 `vars.FROM` (기본 `newsletter@samsungda.net`) — 인증한 도메인과 일치해야 함.
+4. **FRED API**: `FRED_API_KEY`가 있으면 공식 API로 조회하고, 성공 응답은 R2 `signals/fred/*.json`에 캐시해 일시 장애 때 직전 성공값을 사용합니다.
+5. **발신 주소**: `wrangler.jsonc`의 `vars.FROM` (기본 `newsletter@samsungda.net`) — 인증한 도메인과 일치해야 함.
 
 ## 미리보기·아카이브 도메인(선택)
 `newsletter.samsungda.net` 커스텀 도메인을 붙이면 `/preview`·`/latest`를 브라우저에서 열람 가능.
