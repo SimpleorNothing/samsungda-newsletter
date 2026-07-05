@@ -941,16 +941,18 @@ export function renderEmail(data, opts = {}) {
   // 추이 스트립: 6개월 일봉 시리즈 → QuickChart Baseline PNG(이메일 안전). 이미지 차단 대비 vs 6M 델타 텍스트 병기.
   // hex → rgba(투명도) : QuickChart 면적 채움 색 생성. T 토큰 기반이라 리터럴 색 하드코딩 아님.
   const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
-  // Baseline: 기간시작(series[0]) 기준선 위=상승색(적)·아래=하락색(청) 면적 채움 + 방향색 라인. Chart.js v4 fill.above/below.
-  const sparkUrl = (series, net) => {
+  // Baseline: 지표 성격(good)에 따라 '방향'이 아닌 '당사 유불리'로 채색 — 유리=파란색(T.down)·불리=빨간색(T.up).
+  // good=true(수요형: 기존주택 등) 상승이 유리, good=false(원가·금리·물가형) 상승이 불리. 기준선 위/아래 면적도 같은 규칙. Chart.js v4 fill.above/below.
+  const favCol = (v, good) => v == null ? T.muted : ((v >= 0) === !!good ? T.down : T.up);
+  const sparkUrl = (series, net, good) => {
     if (!series || series.length < 4) return "";
     const ref = series[0];
-    const lineCol = net == null ? T.muted : (net >= 0 ? T.up : T.down);
+    const lineCol = favCol(net, good);
     const c = {
       type: "line",
       data: { labels: series.map(() => ""), datasets: [{
         data: series, borderColor: lineCol, borderWidth: 2, pointRadius: 0, tension: 0.28,
-        fill: { target: { value: ref }, above: rgba(T.up, 0.15), below: rgba(T.down, 0.15) },
+        fill: { target: { value: ref }, above: rgba(good ? T.down : T.up, 0.15), below: rgba(good ? T.up : T.down, 0.15) },
       }] },
       options: {
         plugins: { legend: { display: false } },
@@ -962,14 +964,15 @@ export function renderEmail(data, opts = {}) {
   };
   const trendCell = (label, valHtml, qi, opts) => {
     const mode = (opts && opts.delta) || "pct";
+    const good = !!(opts && opts.good);   // 값 상승이 당사에 유리한 수요형 지표면 true
     const net = (qi && qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
     const abs = (qi && qi.first6m != null) ? (qi.price - qi.first6m) : null;
     let dirBase, deltaTxt;
     if (mode === "pp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.abs(abs).toFixed(1)}%p`; }
     else if (mode === "bp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.round(Math.abs(abs) * 100)}bp`; }
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
-    const col = dirBase == null ? T.muted : (dirBase >= 0 ? T.up : T.down);
-    const url = qi ? sparkUrl(qi.spark, dirBase) : "";
+    const col = favCol(dirBase, good);
+    const url = qi ? sparkUrl(qi.spark, dirBase, good) : "";
     const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:8px 0 6px">` : `<div style="height:84px;margin:8px 0 6px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
@@ -997,7 +1000,7 @@ export function renderEmail(data, opts = {}) {
   const consumeTrend = trendStrip([
     trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp" }),
     trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp" }),
-    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT),
+    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true }),
   ].join(""));
   const scfiCell = scfiT
     ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT)
