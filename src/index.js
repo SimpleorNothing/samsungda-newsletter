@@ -454,7 +454,7 @@ async function gatherData(env) {
     getCiBoard(),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
-  const news = (newsPool || []).slice(0, 5);
+  const news = selectNews(newsPool || []);
   await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
   const data = { date: kstDate(), q, macro, freight, news, ideas, reports, ciBoard };
   data.signals = analyzeSignals(sigHist, data);
@@ -826,8 +826,28 @@ async function getNews() {
     const cut = Date.now() - DAY;
     const recent = items.filter(i => new Date(i.publishedAt).getTime() >= cut);
     const pool = recent.length ? recent : items;
-    return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 slice)
+    return pool.sort((a, b) => (GRADE_W[b.grade] - GRADE_W[a.grade]) || (b.impact - a.impact)); // 후보 산출 위해 풀 반환(표시용 5건은 gatherData에서 selectNews로 선별)
   } catch { return []; }
+}
+// 당사(삼성전자) 단독 주제 기사 판별 — 삼성·경쟁사 동시 등장 비교/산업 기사는 경쟁사 성격으로 보고 제외.
+function isOwnCompanyNews(n) {
+  const comps = n.competitors || [];
+  return comps.length === 1 && comps[0] === "삼성전자";
+}
+// 표시용 뉴스 선별: grade·impact 정렬된 풀에서 최대 limit건, 그중 당사(삼성) 단독기사는 최대 ownCap건만 채택.
+// 나머지 자리는 경쟁사·소비자·기술 등 비당사 기사로 자동 충당(정렬 순서 유지).
+function selectNews(pool, limit = 5, ownCap = 1) {
+  const out = [];
+  let ownCount = 0;
+  for (const n of pool) {
+    if (out.length >= limit) break;
+    if (isOwnCompanyNews(n)) {
+      if (ownCount >= ownCap) continue;
+      ownCount++;
+    }
+    out.push(n);
+  }
+  return out;
 }
 
 // CI 보드(경쟁사 전략 추적)의 사람이 검토·확정한 최근 동향(evidence.json) — strategies.json의
