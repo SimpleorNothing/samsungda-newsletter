@@ -16,7 +16,7 @@
 import { SCFI_SEED } from "./scfi-seed.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
-const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지(항목별 딥링크 미지원 → 뱅크로 연결)
+const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
 const REPORT_BASE = "https://samsungda.net/research/";      // 보고서 파일: /research/<R2 key> 로 항목별 연결
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
@@ -1190,7 +1190,7 @@ export function renderEmail(data, opts = {}) {
   const reportTitle = t => t.replace(/(_\d{6})\d{4}(?:_.*)?$/, "$1");
   const freshCutoff = Date.now() - 7 * 24 * 3600 * 1000;
   const newItems = [
-    ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: "https://idea.samsungda.net/", ts: i.createdAt || 0 })),
+    ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: i.id ? IDEA_URL + "/#" + encodeURIComponent(i.id) : IDEA_URL + "/", ts: i.createdAt || 0 })),
     ...data.reports.map(r => ({ kind: "보고서", title: reportTitle(r.title || ""), url: r.key ? "https://samsungda.net/research/" + encodeURIComponent(r.key) : "", ts: r.uploaded ? new Date(r.uploaded).getTime() : 0 })),
   ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 3);
   const newTag = kind => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-right:7px;vertical-align:middle;line-height:1.6">${kind}</span>`;
