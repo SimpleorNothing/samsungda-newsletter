@@ -1018,7 +1018,7 @@ async function aiSummary(env, data) {
         },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
-          max_tokens: 1400,
+          max_tokens: 4000,
           system: [
             "삼성전자 생활가전(DA) 기획자를 위한 데일리 브리핑을 쓴다.",
             "수치 나열이 아니라 '왜 움직였고 DA 기획에 무엇을 뜻하는지' 맥락을 담는다.",
@@ -1056,8 +1056,9 @@ async function aiSummary(env, data) {
       if (res.ok) {
         const j = await res.json();
         const t = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-        const raw = t.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(raw);
+        const cleaned = t.replace(/```json|```/g, "").trim();
+        const mm = cleaned.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(mm ? mm[0] : cleaned);
         const rs = sectionInsights(data);
         const str = (v, n) => typeof v === "string" ? v.trim().slice(0, n) : "";
         const newsWhy = {};
@@ -1075,8 +1076,10 @@ async function aiSummary(env, data) {
           sec: { consume: str(parsed.consume, 120) || rs.consume, cost: str(parsed.cost, 120) || rs.cost, news: str(parsed.newsSummary, 120) || rs.news },
           newsWhy,
         };
+      } else {
+        try { console.warn("aiSummary non-OK", res.status, (await res.text()).slice(0, 300)); } catch {}
       }
-    } catch { /* 폴백 */ }
+    } catch (e) { console.error("aiSummary error", e && e.message); }
   }
   return ruleSummary(data);
 }
