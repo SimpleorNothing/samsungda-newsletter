@@ -1142,7 +1142,7 @@ export function renderEmail(data, opts = {}) {
   const newsWhyRows = w => {
     if (!w) return "";
     const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : w;
-    const row = (label, text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="background:${rgba(color, 0.16)};color:${color};font-weight:700;padding:1px 5px;border-radius:2px">${label}</span> ${esc(text)}</div>` : "";
+    const row = (label, text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="background:linear-gradient(transparent 58%, ${rgba(color, 0.28)} 58%);color:${T.text};font-weight:700;padding:0 2px">${label}</span> ${esc(text)}</div>` : "";
     return row("내용", o.content, T.text) + row("기회", o.opportunity, T.brand) + row("위협", o.threat, T.up);
   };
   const newsRows = data.news.length
