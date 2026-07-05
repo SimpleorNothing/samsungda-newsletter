@@ -53,6 +53,17 @@ const T = {
   up: "#B02E24", down: "#46647E",
 };
 
+// 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
+const CHANGELOG = [
+  { d: "2026.07.05", t: "추이 그래프: 유리 파랑·불리 빨강 단일색 + 세로 그라데이션 적용" },
+  { d: "2026.07.05", t: "추이 그래프 2배 확대 · 저점/고점 상하 꽉채움 · 처음/마지막 값·연월(x축) 표기" },
+  { d: "2026.07.05", t: "추이 그래프 색상을 등락 방향이 아닌 '당사 유불리' 기준으로 변경" },
+  { d: "2026.07.05", t: "소비·원가 6개월 추이 미니차트(CPI·금리·주택·유가·철강·SCFI) 도입" },
+  { d: "2026.07.05", t: "가전 주요뉴스 썸네일·요약 + '오늘의 맥락' 종합 브리핑, 아이디어·등급 라벨 정비" },
+  { d: "2026.07.04", t: "뉴스레터 모음·회차별 열람 페이지 + 업데이트 이력 표시 추가" },
+  { d: "2026.07.04", t: "발송 제목·날짜에 요일 표기, 구독 완료 확인 메일 발송" },
+];
+
 // LG 전략축 카탈로그 — competitor_intelligence strategies.json (lg-a1~a6) 동기화. 뉴스→축 라우팅 키워드.
 const CI_AXES = [
   { code: "A1", id: "lg-a1", title: "구독/서비스 수익모델 확장", kw: ["구독", "렌탈", "케어", "멤버십", "구독료", "가전구독", "서비스매출", "d2x"] },
@@ -468,9 +479,7 @@ async function listIssues(env) {
 async function archivePage(env) {
   const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
   const issues = await listIssues(env);
-  const UPDATES = [
-    { d: "2026.07.04", t: "페이지 하단 업데이트 이력 표시 추가" },
-  ];
+  const UPDATES = CHANGELOG;
   const updLatest = UPDATES.length ? UPDATES[0].d : "";
   const updRows = UPDATES.map(function (u) {
     return '<li><span class="ld">' + u.d + '</span><span class="lt">' + u.t + '</span></li>';
@@ -1211,8 +1220,18 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
   <div style="max-width:600px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
     지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 일 1회 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 엑셀 seed + 누적 관측치 기준.
   </div>
+  <div style="max-width:600px;margin:14px auto 0;text-align:left">
+    <span id="nlUpdWrap" style="position:relative;display:inline-block">
+      <span id="nlUpdBtn" style="font-size:13px;color:${T.muted};cursor:pointer;user-select:none;font-variant-numeric:tabular-nums">update : ${CHANGELOG.length ? CHANGELOG[0].d : ""} &#9662;</span>
+      <span id="nlUpdLog" style="display:none;position:absolute;left:0;bottom:calc(100% + 8px);width:340px;max-width:80vw;max-height:52vh;overflow:auto;background:${T.surface};border:1px solid ${T.border};box-shadow:0 12px 28px rgba(23,34,45,.16);padding:14px 14px 8px;z-index:50;text-align:left">
+        <span style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700;color:${T.muted};margin-bottom:6px"><span>업데이트 내역</span><span id="nlUpdClose" style="cursor:pointer;font-size:18px;line-height:1;color:${T.muted}">&times;</span></span>
+        ${CHANGELOG.map(u => `<span style="display:flex;gap:12px;font-size:12.5px;color:${T.muted};line-height:1.5;padding:9px 0;border-top:1px solid ${T.border}"><span style="flex:0 0 auto;font-weight:700;color:${T.text};font-variant-numeric:tabular-nums">${esc(u.d)}</span><span style="flex:1">${esc(u.t)}</span></span>`).join("")}
+      </span>
+    </span>
+  </div>
 </td></tr>
 </table>
+<script>(function(){var b=document.getElementById("nlUpdBtn"),l=document.getElementById("nlUpdLog"),w=document.getElementById("nlUpdWrap"),x=document.getElementById("nlUpdClose");if(!b||!l)return;function o(s){l.style.display=s?"block":"none";}b.addEventListener("click",function(e){e.stopPropagation();o(l.style.display!=="block");});if(x)x.addEventListener("click",function(e){e.stopPropagation();o(false);});document.addEventListener("click",function(e){if(l.style.display==="block"&&w&&!w.contains(e.target))o(false);});document.addEventListener("keydown",function(e){if(e.key==="Escape")o(false);});})();</script>
 </body></html>`;
 }
 
