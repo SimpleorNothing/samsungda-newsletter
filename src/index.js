@@ -1107,7 +1107,7 @@ export function renderEmail(data, opts = {}) {
   const newsWhyRows = w => {
     if (!w) return "";
     const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : w;
-    const row = (label, text, color) => text ? `<div style="margin-top:4px;font-size:13px;color:${T.text};line-height:1.5"><span style="color:${color};font-weight:700">${label}</span> ${esc(text)}</div>` : "";
+    const row = (label, text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="background:${rgba(color, 0.16)};color:${color};font-weight:700;padding:1px 5px;border-radius:2px">${label}</span> ${esc(text)}</div>` : "";
     return row("내용", o.content, T.text) + row("기회", o.opportunity, T.brand) + row("위협", o.threat, T.up);
   };
   const newsRows = data.news.length
@@ -1122,7 +1122,7 @@ export function renderEmail(data, opts = {}) {
         <td valign="top" style="padding:8px 0">
         <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni])}
-        <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.grade)} · ${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
+        <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
         </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
