@@ -1,6 +1,6 @@
 // samsungda-newsletter — 기획 데일리 (Cloudflare Worker + Cron)
 //
-// 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재(전월)·운임 FBX(일간, R2 갱신)
+// 콘텐츠: [원가] 환율(원·페소·바트·동·루피·즈워티 — 생산거점 통화, 원가 관점 전용)·유가(전일)·원자재(전월)·운임 SCFI·FBX(주간, web_search 자동 캐시 + R2 override)
 //         [소비] 금리 美10Y(전일)·수요 홈빌더ITB/소비재XLY(전일)·주간 실업수당청구/30Y모기지(전주)·물가 美CPI/PCE·韓CPI(YoY)·주택 착공/기존판매(MoM)·소비심리 UMich(MoM)
 //         [도구모음] MI뉴스·아이디어뱅크·보고서
 // 편성: 월~금 데일리. cron 45 22 * * 1-5 (07:45 KST).
@@ -16,7 +16,7 @@ const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
-const FBX_KEY = "signals/fbx.json";  // FBX(Freightos Baltic Index) 일간 운임지수 — R2 수동/외부 갱신
+const FBX_KEY = "signals/fbx.json";  // 운임지수 캐시(SCFI 종합·FBX Global) — web_search 주간 자동 갱신 + 수동 override
 const SIG_KEY = "signals/history.json";        // 일별 지표 스냅샷 누적(최대 90일) — 누적 신호 감지용
 const CI_CAND_KEY = "signals/ci-candidates.json"; // LG 전략축 관련 뉴스 스테이징(CI 센싱 inbox 후보, 사람 검토)
 const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
@@ -102,7 +102,8 @@ function snapshotSignals(data) {
     date: data.date,
     krw: g("KRW=X"), mxn: g("MXN=X"), thb: g("THB=X"), vnd: g("VND=X"), inr: g("INR=X"), pln: g("PLN=X"),
     wti: g("CL=F"), copper: g("HG=F"), tnx: g("^TNX"), itb: g("ITB"), xly: g("XLY"),
-    fbx: s && s.value != null ? s.value : null,
+    fbx: s && s.fbx && s.fbx.value != null ? s.fbx.value : null,
+    scfi: s && s.scfi && s.scfi.value != null ? s.scfi.value : null,
   };
 }
 async function loadSignalHistory(env) {
@@ -320,6 +321,7 @@ async function allRecipients(env) {
 
 // ---------- 발송 ----------
 async function run(env, { send }) {
+  await refreshFreight(env);  // 주간 운임(SCFI/FBX) web_search 캐시 갱신 — cron·발송 경로에서만(preview 미호출)
   const data = await gatherData(env);
   const base = renderEmail(data);
   const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
@@ -578,10 +580,68 @@ async function getMacro() {
   Object.keys(FRED_WEEKLY).forEach((k, i) => s[k] = fredStat(wRows[i]));  // mom = 전주比
   return s;
 }
-async function getFreight(env) {
+async function getFreightRaw(env) {
   if (!env.RESEARCH) return null;
   try { const o = await env.RESEARCH.get(FBX_KEY); if (o) return await o.json(); } catch { /* ignore */ }
   return null;
+}
+// R2 캐시를 {scfi,fbx,source}로 정규화. 신규 스키마 우선, 구 스키마({value,mom,asof})는 FBX로 매핑(수동 override 호환).
+async function getFreight(env) {
+  const r = await getFreightRaw(env);
+  if (!r) return null;
+  if (r.scfi !== undefined || r.fbx !== undefined) return { scfi: r.scfi || null, fbx: r.fbx || null, source: r.source || null };
+  if (r.value != null) return { scfi: null, fbx: { value: r.value, wow: r.mom != null ? r.mom : null, asof: r.asof || null }, source: "manual" };
+  return null;
+}
+// ISO 주차 문자열(YYYY-Www) — 주간 캐시 신선도 판정용.
+function isoWeek(d) {
+  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const yStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil((((dt - yStart) / 86400000) + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
+}
+// 이번 주 캐시가 이미 web_search로 갱신됐으면 skip. 아니면 Claude API+web_search로 SCFI/FBX 최신치 조회 → R2 캐시.
+// 실발송·cron에서만 호출(preview 읽기전용 원칙). 실패 시 기존 캐시 유지(수동값 폴백).
+async function refreshFreight(env) {
+  if (!env.RESEARCH || !env.ANTHROPIC_API_KEY) return;
+  const wk = isoWeek(new Date());
+  try { const cur = await getFreightRaw(env); if (cur && cur.source === "web_search" && cur.week === wk) return; } catch { /* 계속 진행 */ }
+  try {
+    const f = await fetchFreightViaSearch(env);
+    if (f) await env.RESEARCH.put(FBX_KEY, JSON.stringify({ ...f, source: "web_search", week: wk, updatedAt: Date.now() }), { httpMetadata: { contentType: "application/json" } });
+  } catch { /* 조회 실패 시 기존 캐시 유지 */ }
+}
+async function fetchFreightViaSearch(env) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
+      system: [
+        "컨테이너 해상운임 지수 최신치를 웹에서 조사해 JSON 한 덩어리로만 답한다.",
+        "대상: (1) SCFI 종합지수(Shanghai Containerized Freight Index, Comprehensive Index) (2) FBX Global(Freightos Baltic Index, global composite).",
+        "각 지표의 최신 발표 수치·전주比 변동률(%)·발표일(YYYY-MM-DD)을 찾는다. 최근 1~2주 내 발표치만 사용.",
+        '스키마: {"scfi":{"value":1234.5,"wow":-2.1,"asof":"2026-07-04"},"fbx":{"value":2100,"wow":1.3,"asof":"2026-07-04"}}',
+        "값을 못 찾은 지표는 그 객체를 null. wow를 못 구하면 null. 숫자는 순수 number(단위·쉼표 제외). 코드펜스·설명·인사말 금지, JSON만.",
+      ].join("\n"),
+      messages: [{ role: "user", content: "최신 SCFI 종합지수와 FBX Global 운임지수를 조사해서 스키마대로 JSON만 반환." }],
+    }),
+  });
+  if (!res.ok) return null;
+  const j = await res.json();
+  const t = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+  const m = t.replace(/```json|```/g, "").match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let pj; try { pj = JSON.parse(m[0]); } catch { return null; }
+  const norm = o => (o && typeof o.value === "number" && isFinite(o.value))
+    ? { value: o.value, wow: (typeof o.wow === "number" && isFinite(o.wow)) ? o.wow : null, asof: typeof o.asof === "string" ? o.asof.slice(0, 10) : null }
+    : null;
+  const out = { scfi: norm(pj.scfi), fbx: norm(pj.fbx) };
+  return (out.scfi || out.fbx) ? out : null;
 }
 async function getNews() {
   try {
@@ -638,7 +698,8 @@ function summaryContext(data) {
   if (q["CL=F"]) L.push(`WTI ${q["CL=F"].price.toFixed(1)} (전일 ${sPct(pctOf(q["CL=F"].price, q["CL=F"].prevDay))})`);
   if (q["HG=F"]) L.push(`구리 ${q["HG=F"].price.toFixed(2)} (전월 ${sPct(pctOf(q["HG=F"].price, q["HG=F"].prevMonth))})`);
   if (m.ironore) L.push(`철광석 전월 ${sPct(m.ironore.mom)}`);
-  if (s && s.value != null) L.push(`FBX(운임) ${s.value}${s.mom != null ? ` (전일 ${sPct(s.mom)})` : ""}`);
+  if (s && s.scfi && s.scfi.value != null) L.push(`SCFI(상하이발 운임) ${s.scfi.value}${s.scfi.wow != null ? ` (전주 ${sPct(s.scfi.wow)})` : ""}`);
+  if (s && s.fbx && s.fbx.value != null) L.push(`FBX(글로벌 운임) ${s.fbx.value}${s.fbx.wow != null ? ` (전주 ${sPct(s.fbx.wow)})` : ""}`);
   if (q["^TNX"]) L.push(`美10Y ${q["^TNX"].price.toFixed(2)}% (전일 ${sPct(pctOf(q["^TNX"].price, q["^TNX"].prevDay))})`);
   if (q["ITB"]) L.push(`홈빌더ETF(ITB) ${q["ITB"].price.toFixed(2)} (전일 ${sPct(pctOf(q["ITB"].price, q["ITB"].prevDay))})`);
   if (q["XLY"]) L.push(`소비재ETF(XLY) ${q["XLY"].price.toFixed(2)} (전일 ${sPct(pctOf(q["XLY"].price, q["XLY"].prevDay))})`);
@@ -692,7 +753,7 @@ async function aiSummary(env, data) {
             "- consume: 소비 환경(금리·수요ETF·주간지표·물가·주택·심리)이 가전 수요에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 예: '고금리 고착으로 교체 수요 관망 (10Y 4.37%·기존판매 ▼2.1%)'.",
             "  · 물가·주택·심리가 월간이라 당일 신선한 델타가 없으면, 일간 프록시(10Y 전일·홈빌더ETF ITB 전일·소비재ETF XLY 전일)나 주간 지표(신규 실업수당청구·30Y 모기지 전주)를 근거로 소비 방향을 서술한다. 매일 최소 하나의 신선 신호를 담는다.",
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
-            "- cost: 원가 환경(환율·유가·원자재·운임 FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. FBX(운임)는 컨테이너 수출 물류비 방향 신호로 해석.",
+            "- cost: 원가 환경(환율·유가·원자재·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임 — 둘 다 수출 물류비 방향 신호로 해석.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
             "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
@@ -812,14 +873,16 @@ export function renderEmail(data, opts = {}) {
     q["HG=F"] ? `구리 <b>$${fmt(q["HG=F"].price)}/lb</b>${mom(q["HG=F"])}` : null,
     m.ironore ? `철광석 <b>$${fmt(m.ironore.val, 1)}/t</b>${arrow(m.ironore.mom)} <span style="color:${T.muted};font-size:12px">(${m.ironore.date})</span>` : null,
   ].filter(Boolean).join(dot);
-  const fbxVal = s && s.value != null
-    ? `<b>${fmt(s.value, 0)}</b>${s.mom != null ? arrow(s.mom) : ""} <span style="color:${T.muted};font-size:12px">(${s.asof ? esc(s.asof) : "수동 갱신"})</span>`
-    : `<b>—</b> <span style="color:${T.muted};font-size:12px">(수동 갱신)</span>`;
+  const freightUnit = (o, name) => o && o.value != null
+    ? `${name} <b>${fmt(o.value, 0)}</b>${o.wow != null ? arrow(o.wow) : ""}${o.asof ? ` <span style="color:${T.muted};font-size:12px">(${esc(o.asof)})</span>` : ""}`
+    : null;
+  const freightParts = s ? [freightUnit(s.scfi, "SCFI"), freightUnit(s.fbx, "FBX")].filter(Boolean).join(dot) : "";
+  const fbxVal = freightParts || `<b>—</b> <span style="color:${T.muted};font-size:12px">(수동 갱신)</span>`;
   const cost = [
     fxParts ? line(`${lbl("환율")} ${fxParts}`) : "",
     q["CL=F"] ? line(`${lbl("유가")} WTI <b>$${fmt(q["CL=F"].price)}</b>${dchg(q["CL=F"])}`) : "",
     matParts ? line(`${lbl("원자재")} ${matParts}`) : "",
-    line(`${lbl("운임")} FBX ${fbxVal}`),
+    line(`${lbl("운임")} ${fbxVal}`),
   ].join("");
 
   // 소비
@@ -904,7 +967,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
     ${sigStrip}
     ${section("소비", consumeTrend + consume, "금리·수요 전일 · 주간지표 전주 · 물가 전년 · 주택·심리 전월", true, sm.sec.consume)}
-    ${section("원가", costTrend + cost, "환율·유가·운임 전일 · 원자재 전월", false, sm.sec.cost)}
+    ${section("원가", costTrend + cost, "환율·유가 전일 · 운임 전주 · 원자재 전월", false, sm.sec.cost)}
     ${section("가전 주요뉴스", newsRows)}
     ${section("아이디어 뱅크", ideaRows)}
     ${section("보고서", reportRows)}
@@ -913,7 +976,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:11px;color:${T.muted};text-align:center;line-height:1.6">
-    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더/소비재ETF), FRED(실업수당청구·모기지·CPI·PCE·주택·소비심리·철광석), FBX(Freightos Baltic Index·운임). 비교시점: 환율·유가·수요ETF·운임 전일, 주간지표 전주, 원자재 전월, 물가 전년, 주택·심리 전월. 주간/월간지표는 최신 발표치 기준.
+    지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더/소비재ETF), FRED(실업수당청구·모기지·CPI·PCE·주택·소비심리·철광석), SCFI(Shanghai Containerized Freight Index·상하이발 운임)·FBX(Freightos Baltic Index·글로벌 운임, web_search 주간 캐시). 비교시점: 환율·유가·수요ETF 전일, 운임 전주, 주간지표 전주, 원자재 전월, 물가 전년, 주택·심리 전월. 주간/월간지표는 최신 발표치 기준.
   </div>
 </td></tr>
 </table>
