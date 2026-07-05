@@ -853,7 +853,7 @@ async function getIdeas(env) {
     } while (cursor);
   } catch { return []; }
   items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return items.slice(0, 5);
+  return items.slice(0, 30);
 }
 async function getReports(env) {
   if (!env.RESEARCH) return [];
@@ -861,9 +861,9 @@ async function getReports(env) {
     const listed = await env.RESEARCH.list({ include: ["customMetadata", "httpMetadata"] });
     return (listed.objects || [])
       .filter(o => !o.key.startsWith(BANK_PREFIX) && !o.key.startsWith(NL_PREFIX) && !o.key.startsWith(SUB_PREFIX) && !o.key.startsWith("signals/"))
-      .map(o => ({ title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded }))
+      .map(o => ({ title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded, key: o.key }))
       .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
-      .slice(0, 5);
+      .slice(0, 30);
   } catch { return []; }
 }
 function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s; } }
@@ -1183,17 +1183,19 @@ export function renderEmail(data, opts = {}) {
         </tr></table>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 24시간 신규 없음</div>`;
-  const ideaRows = data.ideas.length
-    ? data.ideas.map(i => {
-        const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
-        return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:14px;font-weight:600;color:${T.text}">• ${esc(i.title)}</span>${memo}</div>`;
-      }).join("")
-    : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
-  const reportRows = data.reports.length
-    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">• ${esc(r.title)}
-        <span style="font-size:13px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
-    : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
+  // New 아이디어/보고서 — 아이디어 뱅크 + 보고서 통합, 발송일 기준 지난 1주 내 신규 생성분만.
+  // 파일명 _YYMMDDHHMM…(연월일+시분+메타) → _연월일(YYMMDD)까지만 노출.
+  const reportTitle = t => t.replace(/(_\d{6})\d{4}(?:_.*)?$/, "$1");
+  const freshCutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  const newItems = [
+    ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: "https://idea.samsungda.net/", ts: i.createdAt || 0 })),
+    ...data.reports.map(r => ({ kind: "보고서", title: reportTitle(r.title || ""), url: r.key ? "https://samsungda.net/research/" + encodeURIComponent(r.key) : "", ts: r.uploaded ? new Date(r.uploaded).getTime() : 0 })),
+  ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 12);
+  const newTag = kind => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-right:7px;vertical-align:middle;line-height:1.6">${kind}</span>`;
+  const newRows = newItems.length
+    ? newItems.map(x => `<div style="padding:7px 0;border-bottom:1px solid ${T.border}">
+        <a href="${esc(x.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newTag(x.kind)}${esc(x.title)}</a></div>`).join("")
+    : `<div style="font-size:13px;color:${T.muted}">지난 1주 신규 아이디어·보고서 없음</div>`;
 
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
@@ -1221,8 +1223,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${section("🛒 소비", consumeTrend + consume, "CPI·금리·주택 6개월 추이 · 물가 전년 · 심리 전월", true, sm.sec.consume)}
     ${section("💰 원가", costTrend + cost, "유가·철강·SCFI 6개월 추이 · 원자재·환율", false, sm.sec.cost)}
     ${section("📰 가전 주요뉴스", newsRows, "", false, sm.sec.news)}
-    ${section("💡 아이디어 뱅크", ideaRows)}
-    ${section("📄 보고서", reportRows)}
+    ${section("🆕 New 아이디어/보고서", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
