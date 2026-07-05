@@ -562,13 +562,19 @@ async function yahoo(sym) {
 
 // FRED 무키 CSV → 월별 [{d,v}] 오름차순
 async function fred(id, months = 15) {
-  try {
-    const cosd = new Date(Date.now() - months * 31 * DAY).toISOString().slice(0, 10);
-    const txt = await (await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${cosd}`, UA)).text();
-    return txt.trim().split("\n").slice(1)
-      .map(l => { const [d, v] = l.split(","); return { d, v: parseFloat(v) }; })
-      .filter(r => r.d && !isNaN(r.v));
-  } catch { return []; }
+  const cosd = new Date(Date.now() - months * 31 * DAY).toISOString().slice(0, 10);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}&cosd=${cosd}`, UA);
+      if (!res.ok) continue;
+      const txt = await res.text();
+      const rows = txt.trim().split("\n").slice(1)
+        .map(l => { const [d, v] = l.split(","); return { d, v: parseFloat(v) }; })
+        .filter(r => r.d && !isNaN(r.v));
+      if (rows.length) return rows;
+    } catch { /* retry once */ }
+  }
+  return [];
 }
 function fredStat(rows) {
   if (!rows.length) return null;
@@ -900,22 +906,22 @@ export function renderEmail(data, opts = {}) {
     return "https://quickchart.io/chart?bkg=transparent&v=4&w=132&h=42&c=" + encodeURIComponent(JSON.stringify(c));
   };
   const trendCell = (label, valHtml, qi, opts) => {
-    if (!qi) return `<td width="33%" style="padding:10px 8px;vertical-align:top"></td>`;
     const mode = (opts && opts.delta) || "pct";
-    const net = (qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
-    const abs = (qi.first6m != null) ? (qi.price - qi.first6m) : null;
+    const net = (qi && qi.first6m != null && qi.first6m) ? (qi.price / qi.first6m - 1) * 100 : null;
+    const abs = (qi && qi.first6m != null) ? (qi.price - qi.first6m) : null;
     let dirBase, deltaTxt;
     if (mode === "pp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.abs(abs).toFixed(1)}%p`; }
     else if (mode === "bp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.round(Math.abs(abs) * 100)}bp`; }
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = dirBase == null ? T.muted : (dirBase >= 0 ? T.up : T.down);
-    const url = sparkUrl(qi.spark, dirBase);
+    const url = qi ? sparkUrl(qi.spark, dirBase) : "";
     const img = url ? `<img src="${url}" width="132" height="42" alt="" style="display:block;width:100%;max-width:150px;height:42px;margin:6px 0 4px">` : `<div style="height:42px;margin:6px 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
+    const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:10px 8px;vertical-align:top">
         <div style="font-size:11px;color:${T.muted};font-weight:600">${label}</div>${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
-        <div style="font-size:11px;margin-top:2px">${delta} <span style="color:${T.muted}">6M</span></div>
+        <div style="font-size:11px;margin-top:2px">${deltaLine}</div>
       </td>`;
   };
   const trendStrip = cells => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;border-top:1px solid ${T.border}">
