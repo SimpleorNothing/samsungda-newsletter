@@ -34,5 +34,15 @@
 ## 미리보기·아카이브 도메인(선택)
 `newsletter.samsungda.net` 커스텀 도메인을 붙이면 `/preview`·`/latest`를 브라우저에서 열람 가능.
 
+
+## 운임지수 수동 갱신
+SCFI/FBX는 cron·발송 시 주 1회 web_search로 갱신해 R2 `signals/fbx.json`에 캐시합니다. 미리보기에서 즉시 갱신하려면 보호 키를 붙여 호출합니다.
+
+```bash
+/refresh-freight?key=<TRIGGER_KEY>
+/preview?refresh=freight&key=<TRIGGER_KEY>
+```
+
+SCFI 공식 페이지는 Shanghai Shipping Exchange 영문 SCFI 페이지(`https://en.sse.net.cn/indices/scfinew.jsp`)를 우선 확인하되, 공개 JSON API가 없어 이미지/로그인 제한으로 직접 추출이 안 되면 신뢰 가능한 해운·물류 보도 최신치를 web_search로 보완합니다.
 ## 디자인
 DA 토큰(흰 배경·`#1257d6`·라운드 카드). 이메일 클라이언트 호환 위해 table+inline CSS, 한글 시스템 폰트 폴백.

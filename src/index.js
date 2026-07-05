@@ -185,7 +185,20 @@ export default {
     if (url.pathname === "/subscribe" && request.method === "POST") return handleSubscribe(request, env);
     if (url.pathname === "/unsubscribe") return handleUnsub(url, env);
 
-    if (url.pathname === "/preview") return htmlResp(await buildEmail(env));
+    if (url.pathname === "/preview") {
+      if (url.searchParams.get("refresh") === "freight") {
+        if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+          return new Response("forbidden", { status: 403 });
+        await refreshFreight(env, { force: true });
+      }
+      return htmlResp(await buildEmail(env));
+    }
+    if (url.pathname === "/refresh-freight") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      await refreshFreight(env, { force: true });
+      return json({ ok: true, freight: await getFreight(env) });
+    }
     if (url.pathname === "/send") {
       if (env.TRIGGER_KEY && url.searchParams.get("key") !== env.TRIGGER_KEY)
         return new Response("forbidden", { status: 403 });
@@ -324,7 +337,7 @@ async function allRecipients(env) {
 
 // ---------- 발송 ----------
 async function run(env, { send }) {
-  await refreshFreight(env);  // 주간 운임(SCFI/FBX) web_search 캐시 갱신 — cron·발송 경로에서만(preview 미호출)
+  await refreshFreight(env);  // 주간 운임(SCFI/FBX) web_search 캐시 갱신
   const data = await gatherData(env);
   const base = renderEmail(data);
   const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
@@ -680,11 +693,11 @@ function isoWeek(d) {
   return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
 }
 // 이번 주 캐시가 이미 web_search로 갱신됐으면 skip. 아니면 Claude API+web_search로 SCFI/FBX 최신치 조회 → R2 캐시.
-// 실발송·cron에서만 호출(preview 읽기전용 원칙). 실패 시 기존 캐시 유지(수동값 폴백).
-async function refreshFreight(env) {
+// cron·발송 경로에서 자동 갱신하고, /refresh-freight 또는 /preview?refresh=freight&key=... 에서 보호된 수동 갱신 가능.
+async function refreshFreight(env, opts = {}) {
   if (!env.RESEARCH || !env.ANTHROPIC_API_KEY) return;
   const wk = isoWeek(new Date());
-  try { const cur = await getFreightRaw(env); if (cur && cur.source === "web_search" && cur.week === wk) return; } catch { /* 계속 진행 */ }
+  try { const cur = await getFreightRaw(env); if (!opts.force && cur && cur.source === "web_search" && cur.week === wk) return; } catch { /* 계속 진행 */ }
   try {
     const f = await fetchFreightViaSearch(env);
     if (f) await env.RESEARCH.put(FBX_KEY, JSON.stringify({ ...f, source: "web_search", week: wk, updatedAt: Date.now() }), { httpMetadata: { contentType: "application/json" } });
@@ -700,6 +713,7 @@ async function fetchFreightViaSearch(env) {
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
       system: [
         "컨테이너 해상운임 지수 최신치를 웹에서 조사해 JSON 한 덩어리로만 답한다.",
+        "SCFI는 Shanghai Shipping Exchange 공식 영문 페이지(https://en.sse.net.cn/indices/scfinew.jsp)와 신뢰 가능한 해운/물류 보도에서 Shanghai Containerized Freight Index 종합지수 최신치를 교차 확인한다. 공식 페이지가 이미지/로그인 제한으로 수치 추출이 불가하면 공개 보도 최신치를 사용한다.",
         "대상: (1) SCFI 종합지수(Shanghai Containerized Freight Index, Comprehensive Index) (2) FBX Global(Freightos Baltic Index, global composite).",
         "각 지표의 최신 발표 수치·전주比 변동률(%)·발표일(YYYY-MM-DD)을 찾는다. 최근 1~2주 내 발표치만 사용.",
         '스키마: {"scfi":{"value":1234.5,"wow":-2.1,"asof":"2026-07-04"},"fbx":{"value":2100,"wow":1.3,"asof":"2026-07-04"}}',
@@ -944,7 +958,7 @@ export function renderEmail(data, opts = {}) {
         layout: { padding: 2 },
       },
     };
-    return "https://quickchart.io/chart?bkg=transparent&v=4&w=132&h=42&c=" + encodeURIComponent(JSON.stringify(c));
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=264&h=84&c=" + encodeURIComponent(JSON.stringify(c));
   };
   const trendCell = (label, valHtml, qi, opts) => {
     const mode = (opts && opts.delta) || "pct";
@@ -956,17 +970,17 @@ export function renderEmail(data, opts = {}) {
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = dirBase == null ? T.muted : (dirBase >= 0 ? T.up : T.down);
     const url = qi ? sparkUrl(qi.spark, dirBase) : "";
-    const img = url ? `<img src="${url}" width="132" height="42" alt="" style="display:block;width:100%;max-width:150px;height:42px;margin:6px 0 4px">` : `<div style="height:42px;margin:6px 0 4px"></div>`;
+    const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:8px 0 6px">` : `<div style="height:84px;margin:8px 0 6px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
-    return `<td width="33%" style="padding:10px 8px;vertical-align:top">
+    return `<td width="33%" style="padding:16px 10px;vertical-align:top">
         <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
         <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
   };
   const trendStrip = cells => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px;border-top:1px solid ${T.border}">
-      <tr><td colspan="3" style="padding:9px 8px 0;font-size:13px;font-weight:800;color:${T.muted};letter-spacing:.1em">6개월 추이</td></tr>
+      <tr><td colspan="3" style="padding:12px 10px 0;font-size:13px;font-weight:800;color:${T.muted};letter-spacing:.1em">6개월 추이</td></tr>
       <tr>${cells}</tr></table>`;
   const uPct = `<span style="font-size:13px;color:${T.muted}">%</span>`;
   const uLb = `<span style="font-size:13px;color:${T.muted}">/lb</span>`;
@@ -987,9 +1001,9 @@ export function renderEmail(data, opts = {}) {
   ].join(""));
   const scfiCell = scfiT
     ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT)
-    : `<td width="33%" style="padding:10px 8px;vertical-align:top">
+    : `<td width="33%" style="padding:16px 10px;vertical-align:top">
         <div style="font-size:13px;color:${T.muted};font-weight:600">SCFI 운임</div>
-        <div style="height:42px;margin:6px 0 4px"></div>
+        <div style="height:84px;margin:8px 0 6px"></div>
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${scfiPx != null ? fmt(scfiPx, 0) + uP : "—"}</div>
         <div style="font-size:13px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
       </td>`;
