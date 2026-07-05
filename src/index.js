@@ -16,6 +16,8 @@
 import { SCFI_SEED } from "./scfi-seed.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
+const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지(항목별 딥링크 미지원 → 뱅크로 연결)
+const REPORT_BASE = "https://samsungda.net/research/";      // 보고서 파일: /research/<R2 key> 로 항목별 연결
 const BANK_PREFIX = "idea-bank/";
 const NL_PREFIX = "newsletter/";
 const SUB_PREFIX = "subscribers/";
@@ -861,7 +863,7 @@ async function getReports(env) {
     const listed = await env.RESEARCH.list({ include: ["customMetadata", "httpMetadata"] });
     return (listed.objects || [])
       .filter(o => !o.key.startsWith(BANK_PREFIX) && !o.key.startsWith(NL_PREFIX) && !o.key.startsWith(SUB_PREFIX) && !o.key.startsWith("signals/"))
-      .map(o => ({ title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded }))
+      .map(o => ({ id: o.key, title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded }))
       .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
       .slice(0, 5);
   } catch { return []; }
@@ -1185,11 +1187,11 @@ export function renderEmail(data, opts = {}) {
     ? data.ideas.map(i => {
         const memo = i.memo ? `<div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.memo).slice(0, 90)}</div>` : "";
         return `<div style="padding:8px 0;border-bottom:1px solid ${T.border}">
-          <span style="font-size:14px;font-weight:600;color:${T.text}">• ${esc(i.title)}</span>${memo}</div>`;
+          <a href="${IDEA_URL}" target="_blank" rel="noopener" style="font-size:14px;font-weight:600;color:${T.text};text-decoration:none">• ${esc(i.title)}</a>${memo}</div>`;
       }).join("")
     : `<div style="font-size:13px;color:${T.muted}">저장된 아이디어 없음</div>`;
   const reportRows = data.reports.length
-    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}">• ${esc(r.title)}
+    ? data.reports.map(r => `<div style="padding:6px 0;border-bottom:1px solid ${T.border};font-size:14px;color:${T.text}"><a href="${REPORT_BASE}${esc(encodeURIComponent(r.id))}" target="_blank" rel="noopener" style="color:${T.text};text-decoration:none">• ${esc(r.title)}</a>
         <span style="font-size:13px;color:${T.muted}"> · ${esc(kstDate(new Date(r.uploaded).getTime()))}</span></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">최근 신규 보고서 없음</div>`;
 
