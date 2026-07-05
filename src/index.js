@@ -1176,11 +1176,11 @@ export function renderEmail(data, opts = {}) {
           ? matchAxes(i).slice(0, 2).map(a => `<span title="${esc(a.title)}" style="display:inline-block;font-size:13px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-left:5px;vertical-align:middle;line-height:1.5">${a.code}</span>`).join("")
           : "";
         const thumb = i.image
-          ? `<td width="92" valign="top" style="padding:8px 0 8px 12px;width:92px"><a href="${esc(i.url)}" style="text-decoration:none"><img src="${esc(i.image)}" width="92" height="72" alt="" style="display:block;width:92px;height:72px;object-fit:cover;border:1px solid ${T.border};background:${T.bg}"></a></td>`
+          ? `<td width="92" valign="top" style="padding:8px 0 8px 12px;width:92px"><a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none"><img src="${esc(i.image)}" width="92" height="72" alt="" style="display:block;width:92px;height:72px;object-fit:cover;border:1px solid ${T.border};background:${T.bg}"></a></td>`
           : "";
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
-        <a href="${esc(i.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
+        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
         ${newsWhyRows(sm.newsWhy[ni], i.summary || "")}
         <div style="margin-top:3px;font-size:13px;color:${T.muted}">${esc(i.lens)} · ${esc(i.source?.name || "")}</div></td>${thumb}
         </tr></table>`;
@@ -1197,7 +1197,7 @@ export function renderEmail(data, opts = {}) {
   const newTag = kind => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-right:7px;vertical-align:middle;line-height:1.6">${kind}</span>`;
   const newRows = newItems.length
     ? newItems.map(x => `<div style="padding:7px 0;border-bottom:1px solid ${T.border}">
-        <a href="${esc(x.url)}" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newTag(x.kind)}${esc(x.title)}</a></div>`).join("")
+        <a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newTag(x.kind)}${esc(x.title)}</a></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">지난 1주 신규 아이디어·보고서 없음</div>`;
 
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
@@ -1228,7 +1228,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${section("📰 가전 주요뉴스", newsRows, "", false, sm.sec.news)}
     ${section("🆕 New 아이디어/보고서", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
-      <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+      <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
   </table>
   <div style="max-width:600px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
