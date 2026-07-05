@@ -949,8 +949,8 @@ async function aiSummary(env, data) {
             "- newsSummary: 오늘 가전 주요뉴스 전체를 관통하는 의미 한 문장(명사형 마무리). 개별 기사 나열이 아니라 경쟁·정책·수요 구도 차원의 공통 메시지를 짚는다. 전체 75자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심 한 문장(60자 이내). 항상 채운다.",
-            "  · opportunity: 당사(DA) 기회 — 이 소식이 열어주는 기회 요인(수요·원가·제품 포트폴리오·역외 거점 관점) 한 문장(60자 이내). 기회 요인이 불분명하면 빈 문자열.",
-            "  · threat: 당사(DA) 위협 — 이 소식이 가하는 위협 요인(경쟁 심화·원가 상승·규제·수요 둔화 관점) 한 문장(60자 이내). 위협 요인이 불분명하면 빈 문자열.",
+            "  · opportunity: 당사(DA) 기회 — 반드시 '당사는'으로 시작해 당사의 현황·강점·포지션을 짚고, '이는 ~~~ 당사에게도 기회'(또는 '…당사에도 기회 요인') 형태로 마무리하는 한 문장(80자 이내). 수요·원가·제품 포트폴리오·역외 거점 관점의 기회 요인을 소식 내용에 맞춰 자연스러운 워딩으로 담는다. 기회 요인이 불분명하면 빈 문자열.",
+            "  · threat: 당사(DA) 위협 — 반드시 '반면'으로 시작해 경쟁사·시장·정책의 움직임을 짚고, '~~~ 경쟁 심화'(또는 '…원가 부담·수요 둔화 심화') 등 당사에 가해지는 위협으로 마무리하는 한 문장(80자 이내). 경쟁 심화·원가 상승·규제·수요 둔화 관점의 위협 요인을 소식 내용에 맞춰 자연스러운 워딩으로 담는다. 위협 요인이 불분명하면 빈 문자열.",
             "  · 세 필드 모두 사실·방향 서술만 담는다. '검토 필요'·'대응해야'·'추진 여지' 等 실행 제안·액션 권고 금지 (실행 판단은 사람의 몫).",
             "  · 헤드라인·요약에 없는 사실·수치 창작 금지. content는 항상, opportunity·threat는 근거가 있을 때만 채운다.",
             "- 환율 해석 원칙 (원가 관점 전용 — 매출·수출 채산성 언급 금지):",
@@ -1156,8 +1156,8 @@ export function renderEmail(data, opts = {}) {
   const newsWhyRows = w => {
     if (!w) return "";
     const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : w;
-    const row = (label, text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="background:linear-gradient(transparent 58%, ${rgba(color, 0.28)} 58%);color:${T.text};font-weight:700;padding:0 2px">${label}</span> ${esc(text)}</div>` : "";
-    return row("내용", o.content, T.text) + row("기회", o.opportunity, T.brand) + row("위협", o.threat, T.up);
+    const row = (text, color) => text ? `<div style="margin-top:5px;font-size:13px;color:${T.text};line-height:1.7"><span style="color:${color};font-weight:700;padding:0 3px 0 0">•</span>${esc(text)}</div>` : "";
+    return row(o.content, T.text) + row(o.opportunity, T.brand) + row(o.threat, T.up);
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
