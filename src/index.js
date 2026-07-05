@@ -164,9 +164,15 @@ function scfiTrend(hist, live) {
   const cutMs = new Date(dates[dates.length - 1] + "T00:00:00Z").getTime() - 183 * 86400000;  // ≈6개월 전
   let first6m = byDate.get(dates[0]);
   for (const d of dates) { if (new Date(d + "T00:00:00Z").getTime() <= cutMs) first6m = byDate.get(d); else break; }
-  const recent = dates.filter(d => new Date(d + "T00:00:00Z").getTime() >= cutMs).map(d => byDate.get(d));
-  const sparkSrc = recent.length >= 4 ? recent : dates.slice(-26).map(d => byDate.get(d));
-  return { price, first6m, spark: downsample(sparkSrc, 26).map(v => Number(v.toPrecision(4))) };
+  const recentDates = dates.filter(d => new Date(d + "T00:00:00Z").getTime() >= cutMs);
+  const useRecent = recentDates.length >= 4;
+  const srcDates = useRecent ? recentDates : dates.slice(-26);
+  const sparkSrc = srcDates.map(d => byDate.get(d));
+  return {
+    price, first6m,
+    spark: downsample(sparkSrc, 26).map(v => Number(v.toPrecision(4))),
+    d0: srcDates[0] || null, d1: srcDates[srcDates.length - 1] || null,
+  };
 }
 // 축적분 대비 주간 누적 델타 + 연속 스트릭 → 임계 돌파 신호. 데이터 얕으면 조용히 비활성.
 function analyzeSignals(history, data) {
@@ -603,14 +609,18 @@ async function yahoo(sym) {
   try {
     const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=6mo`;
     const r = (await (await fetch(u, UA)).json()).chart.result[0];
-    const closes = (r.indicators.quote[0].close || []).filter(x => x != null);
+    const ts = r.timestamp || [];
+    const pairs = (r.indicators.quote[0].close || []).map((c, i) => ({ t: ts[i], c })).filter(p => p.c != null);
+    const closes = pairs.map(p => p.c);
     if (!closes.length) return null;
+    const ymOf = t => { if (t == null) return null; const d = new Date(t * 1000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
     return {
       price: closes[closes.length - 1],
       prevDay: closes.length >= 2 ? closes[closes.length - 2] : null,
       prevMonth: closes[Math.max(0, closes.length - 22)],
       first6m: closes[0],
       spark: downsample(closes, 26).map(v => Number(v.toPrecision(4))),
+      d0: ymOf(pairs[0].t), d1: ymOf(pairs[pairs.length - 1].t),
     };
   } catch { return null; }
 }
@@ -680,21 +690,29 @@ function fredStat(rows) {
     yoy: n >= 13 ? (last.v / rows[n - 13].v - 1) * 100 : null,
   };
 }
-// 값 시계열 → 추이셀 {price,first6m,spark}. 월간 시계열은 first6m를 7번째-뒤(≈6개월 전)로.
-function seriesTrend(vals) {
-  const pts = (vals || []).filter(v => v != null && isFinite(v));
+// 값 시계열 → 추이셀 {price,first6m,spark,d0,d1}. 월간 시계열은 최근 ≈6개월(끝 7개 관측)만 스파크로 잘라 '6개월 추이' 라벨·델타와 일치시킨다.
+// dates 는 vals 와 인덱스 정합된 날짜배열(있으면 스파크 양 끝 연월 라벨용).
+function seriesTrend(vals, dates) {
+  const pts = [], pd = [];
+  (vals || []).forEach((v, i) => { if (v != null && isFinite(v)) { pts.push(v); pd.push(dates ? dates[i] : null); } });
   if (pts.length < 4) return null;
   const price = pts[pts.length - 1];
-  const first6m = pts.length >= 7 ? pts[pts.length - 7] : pts[0];
-  return { price, first6m, spark: downsample(pts, 26).map(v => Number(v.toPrecision(4))) };
+  const start = pts.length >= 7 ? pts.length - 7 : 0;   // ≈6개월 전 지점
+  const first6m = pts[start];
+  const win = pts.slice(start);
+  return {
+    price, first6m,
+    spark: downsample(win, 26).map(v => Number(v.toPrecision(4))),
+    d0: pd[start] || null, d1: pd[pts.length - 1] || null,
+  };
 }
 // FRED rows → 추이셀. yoy=true면 전년비(%) 시계열로 변환(레벨이 단조증가하는 CPI용).
 function fredTrend(rows, yoy) {
   if (!rows || rows.length < 4) return null;
-  let vals;
-  if (yoy) { vals = []; for (let i = 12; i < rows.length; i++) vals.push((rows[i].v / rows[i - 12].v - 1) * 100); }
-  else vals = rows.map(r => r.v);
-  return seriesTrend(vals);
+  let vals, dates;
+  if (yoy) { vals = []; dates = []; for (let i = 12; i < rows.length; i++) { vals.push((rows[i].v / rows[i - 12].v - 1) * 100); dates.push(rows[i].d); } }
+  else { vals = rows.map(r => r.v); dates = rows.map(r => r.d); }
+  return seriesTrend(vals, dates);
 }
 async function getMacro(env) {
   const mIds = Object.values(FRED), wIds = Object.values(FRED_WEEKLY);
@@ -990,24 +1008,44 @@ export function renderEmail(data, opts = {}) {
   // Baseline: 지표 성격(good)에 따라 '방향'이 아닌 '당사 유불리'로 채색 — 유리=파란색(T.down)·불리=빨간색(T.up).
   // good=true(수요형: 기존주택 등) 상승이 유리, good=false(원가·금리·물가형) 상승이 불리. 기준선 위/아래 면적도 같은 규칙. Chart.js v4 fill.above/below.
   const favCol = (v, good) => v == null ? T.muted : ((v >= 0) === !!good ? T.down : T.up);
-  const sparkUrl = (series, net, good) => {
+  // ax = { s0,s1 (양 끝 값 텍스트), m0,m1 (양 끝 연월 라벨) }. 값은 라인 끝점 위에, 연월은 x축 양 끝에 표기.
+  const sparkUrl = (series, net, good, ax) => {
     if (!series || series.length < 4) return "";
-    const ref = series[0];
+    const ref = series[0], last = series.length - 1;
     const lineCol = favCol(net, good);
+    const m0 = (ax && ax.m0) || "", m1 = (ax && ax.m1) || "";
+    const hasVals = !!(ax && (ax.s0 || ax.s1));
+    const ds = {
+      data: series, borderColor: lineCol, borderWidth: 2, tension: 0.28,
+      pointRadius: series.map((_, i) => (i === 0 || i === last) ? 3 : 0),
+      pointBackgroundColor: lineCol, pointBorderColor: lineCol,
+      fill: { target: { value: ref }, above: rgba(good ? T.down : T.up, 0.15), below: rgba(good ? T.up : T.down, 0.15) },
+    };
+    if (hasVals) ds.datalabels = { color: T.muted, font: { size: 11, weight: "bold" }, clip: false, anchor: "end", align: "top", offset: 3, formatter: "__FMT__" };
+    else ds.datalabels = { display: false };
     const c = {
       type: "line",
-      data: { labels: series.map(() => ""), datasets: [{
-        data: series, borderColor: lineCol, borderWidth: 2, pointRadius: 0, tension: 0.28,
-        fill: { target: { value: ref }, above: rgba(good ? T.down : T.up, 0.15), below: rgba(good ? T.up : T.down, 0.15) },
-      }] },
+      data: { labels: series.map((_, i) => i === 0 ? m0 : (i === last ? m1 : "")), datasets: [ds] },
       options: {
         plugins: { legend: { display: false } },
-        scales: { x: { display: false }, y: { display: false, grace: "12%" } },
-        layout: { padding: 2 },
+        scales: {
+          x: { display: true, grid: { display: false, drawTicks: false }, border: { display: false }, ticks: { color: T.muted, font: { size: 10 }, autoSkip: false, maxRotation: 0, align: "inner", padding: 2 } },
+          y: { display: false, grace: "26%" },
+        },
+        layout: { padding: { top: 16, left: 6, right: 6, bottom: 0 } },
       },
     };
-    return "https://quickchart.io/chart?bkg=transparent&v=4&w=264&h=84&c=" + encodeURIComponent(JSON.stringify(c));
+    let json = JSON.stringify(c);
+    if (hasVals) {   // datalabels.formatter 는 함수여야 하므로 값 텍스트를 구운 함수 리터럴로 치환(QuickChart 함수 파싱).
+      const q = t => String(t == null ? "" : t).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      json = json.replace('"__FMT__"', `function(v,ctx){var n=ctx.dataset.data.length-1;if(ctx.dataIndex===0)return '${q(ax.s0)}';if(ctx.dataIndex===n)return '${q(ax.s1)}';return null;}`);
+    }
+    return "https://quickchart.io/chart?bkg=transparent&v=4&w=264&h=110&c=" + encodeURIComponent(json);
   };
+  // "YYYY-MM[-DD]" → "'YY.M" 연월 라벨. 없으면 빈 문자열.
+  const ymLabel = s => { if (!s) return ""; const p = String(s).slice(0, 7).split("-"); return p.length < 2 ? "" : `'${p[0].slice(2)}.${parseInt(p[1], 10)}`; };
+  // data.date 기준 6개월 전 "YYYY-MM"(양 끝 연월 폴백용).
+  const minus6YM = ym => { if (!ym) return ""; let [y, mo] = String(ym).slice(0, 7).split("-").map(Number); mo -= 6; while (mo <= 0) { mo += 12; y -= 1; } return `${y}-${String(mo).padStart(2, "0")}`; };
   const trendCell = (label, valHtml, qi, opts) => {
     const mode = (opts && opts.delta) || "pct";
     const good = !!(opts && opts.good);   // 값 상승이 당사에 유리한 수요형 지표면 true
@@ -1018,19 +1056,19 @@ export function renderEmail(data, opts = {}) {
     else if (mode === "bp") { dirBase = abs; deltaTxt = abs == null ? "" : `${abs >= 0 ? "▲" : "▼"}${Math.round(Math.abs(abs) * 100)}bp`; }
     else { dirBase = net; deltaTxt = net == null ? "" : `${net >= 0 ? "▲" : "▼"}${Math.abs(net).toFixed(1)}%`; }
     const col = favCol(dirBase, good);
-    const url = qi ? sparkUrl(qi.spark, dirBase, good) : "";
-    const img = url ? `<img src="${url}" width="264" height="84" alt="" style="display:block;width:100%;max-width:180px;height:84px;margin:2px 0 6px">` : `<div style="height:84px;margin:2px 0 6px"></div>`;
-    // 그래프 양 끝(처음=6개월 전·마지막=현재) 수치를 차트 위 좌·우 정렬로 병기. fv 없으면 기본 포맷.
-    const fv = (opts && opts.fv) || (v => fmt(v));
-    const ends = (qi && qi.first6m != null && qi.price != null)
-      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;max-width:180px;margin:8px 0 0;font-size:11px;color:${T.muted};font-variant-numeric:tabular-nums"><tr>
-          <td align="left" style="color:${T.muted}">${fv(qi.first6m)}</td>
-          <td align="right" style="color:${T.muted}">${fv(qi.price)}</td></tr></table>`
-      : "";
+    // 그래프 양 끝점 위=값(처음=6개월 전·마지막=현재), x축 양 끝=연월. 값은 그리는 라인 끝점과 정확히 일치시키려 spark 끝값 사용.
+    const fvt = (opts && opts.fvt) || (v => fmt(v));   // 차트에 굽는 플레인 텍스트 포맷터(HTML 아님)
+    const sp = qi && qi.spark;
+    const ax = (sp && sp.length >= 4) ? {
+      s0: fvt(sp[0]), s1: fvt(sp[sp.length - 1]),
+      m0: ymLabel(qi.d0 || minus6YM(data.date)), m1: ymLabel(qi.d1 || data.date),
+    } : null;
+    const url = qi ? sparkUrl(qi.spark, dirBase, good, ax) : "";
+    const img = url ? `<img src="${url}" width="264" height="110" alt="" style="display:block;width:100%;max-width:200px;height:auto;margin:6px 0 4px">` : `<div style="height:110px;margin:6px 0 4px"></div>`;
     const delta = deltaTxt ? `<span style="color:${col};font-weight:700">${deltaTxt}</span>` : "";
     const deltaLine = delta ? `${delta} <span style="color:${T.muted}">6M</span>` : `<span style="color:${T.muted}">데이터 확인 중</span>`;
     return `<td width="33%" style="padding:16px 10px;vertical-align:top">
-        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${ends}${img}
+        <div style="font-size:13px;color:${T.muted};font-weight:600">${label}</div>${img}
         <div style="font-size:15px;font-weight:800;color:${T.text};letter-spacing:-.01em">${valHtml}</div>
         <div style="font-size:13px;margin-top:2px">${deltaLine}</div>
       </td>`;
@@ -1051,12 +1089,12 @@ export function renderEmail(data, opts = {}) {
   const scfiT = (s && s.scfi && s.scfi.trend) || null;
   const scfiPx = (s && s.scfi && s.scfi.value != null) ? s.scfi.value : null;
   const consumeTrend = trendStrip([
-    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp", fv: v => `${fmt(v, 1)}${uPct}` }),
-    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fv: v => `${fmt(v)}${uPct}` }),
-    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true, fv: v => `${fmt(v / 1e6, 2)}${uM}` }),
+    trendCell("美 CPI (YoY)", `${fmt(cpiT ? cpiT.price : (m.cpiUS ? m.cpiUS.yoy : null), 1)}${uPct}`, cpiT, { delta: "pp", fvt: v => `${fmt(v, 1)}%` }),
+    trendCell("美 10Y 금리", `${fmt(q["^TNX"] ? q["^TNX"].price : null)}${uPct}`, q["^TNX"], { delta: "bp", fvt: v => `${fmt(v)}%` }),
+    trendCell("기존주택 거래", `${fmt(exhT ? exhT.price / 1e6 : (m.exhome ? m.exhome.val / 1e6 : null), 2)}${uM}`, exhT, { good: true, fvt: v => `${fmt(v / 1e6, 2)}M` }),
   ].join(""));
   const scfiCell = scfiT
-    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT, { fv: v => `${fmt(v, 0)}${uP}` })
+    ? trendCell("SCFI 운임", `${fmt(scfiPx, 0)}${uP}`, scfiT, { fvt: v => `${fmt(v, 0)}p` })
     : `<td width="33%" style="padding:16px 10px;vertical-align:top">
         <div style="font-size:13px;color:${T.muted};font-weight:600">SCFI 운임</div>
         <div style="height:84px;margin:8px 0 6px"></div>
@@ -1064,8 +1102,8 @@ export function renderEmail(data, opts = {}) {
         <div style="font-size:13px;margin-top:2px"><span style="color:${T.muted}">추이 축적 중</span></div>
       </td>`;
   const costTrend = trendStrip([
-    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fv: v => `$${fmt(v)}` }),
-    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT, { fv: v => fmt(v, 1) }),
+    trendCell("WTI 유가", `$${fmt(q["CL=F"] ? q["CL=F"].price : null)}`, q["CL=F"], { fvt: v => `$${fmt(v)}` }),
+    trendCell("철강 (PPI)", `${fmt(steelT ? steelT.price : (m.steel ? m.steel.val : null), 1)}`, steelT, { fvt: v => fmt(v, 1) }),
     scfiCell,
   ].join(""));
 
