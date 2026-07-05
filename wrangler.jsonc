@@ -7,7 +7,7 @@
     { "binding": "RESEARCH", "bucket_name": "samsungda-research" }
   ],
   "triggers": {
-    "crons": ["35 22 * * *"]
+    "crons": ["30 21 * * *"]
   },
   "vars": {
     "FROM": "기획 도구모음 <newsletter@samsungda.net>",
