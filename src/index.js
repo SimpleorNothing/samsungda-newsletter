@@ -1194,10 +1194,17 @@ export function renderEmail(data, opts = {}) {
     ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: i.id ? IDEA_URL + "/#" + encodeURIComponent(i.id) : IDEA_URL + "/", ts: i.createdAt || 0 })),
     ...data.reports.map(r => ({ kind: "보고서", title: reportTitle(r.title || ""), url: r.key ? "https://samsungda.net/research/" + encodeURIComponent(r.key) : "", ts: r.uploaded ? new Date(r.uploaded).getTime() : 0 })),
   ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 3);
-  const newTag = kind => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-right:7px;vertical-align:middle;line-height:1.6">${kind}</span>`;
+  // 종류 표시를 네모박스 라벨 → 무채색 회색 라인 아이콘으로 변경(아이디어=전구, 보고서=문서).
+  const newIcon = kind => {
+    const s = `stroke="${T.muted}" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+    const path = kind === "아이디어"
+      ? `<path d="M9 18h6" ${s}/><path d="M10 21h4" ${s}/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.45.9 1.1.9 1.85V16h5.4v-.35c0-.75.3-1.4.9-1.85A6 6 0 0 0 12 3Z" ${s}/>`
+      : `<path d="M13.5 3H7A1.5 1.5 0 0 0 5.5 4.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8Z" ${s}/><path d="M13.5 3v5h5" ${s}/><path d="M8.5 13h7M8.5 16.5h7" ${s}/>`;
+    return `<span style="display:inline-block;width:15px;height:15px;margin-right:7px;vertical-align:middle;line-height:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" role="img" aria-label="${kind}">${path}</svg></span>`;
+  };
   const newRows = newItems.length
     ? newItems.map(x => `<div style="padding:7px 0;border-bottom:1px solid ${T.border}">
-        <a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newTag(x.kind)}${esc(x.title)}</a></div>`).join("")
+        <a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newIcon(x.kind)}${esc(x.title)}</a></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">지난 1주 신규 아이디어·보고서 없음</div>`;
 
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
