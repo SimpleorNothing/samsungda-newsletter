@@ -1192,7 +1192,7 @@ export function renderEmail(data, opts = {}) {
   const newItems = [
     ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: "https://idea.samsungda.net/", ts: i.createdAt || 0 })),
     ...data.reports.map(r => ({ kind: "보고서", title: reportTitle(r.title || ""), url: r.key ? "https://samsungda.net/research/" + encodeURIComponent(r.key) : "", ts: r.uploaded ? new Date(r.uploaded).getTime() : 0 })),
-  ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 12);
+  ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 3);
   const newTag = kind => `<span style="display:inline-block;font-size:11px;font-weight:700;color:${T.brand};border:1px solid ${T.brand};padding:0 5px;margin-right:7px;vertical-align:middle;line-height:1.6">${kind}</span>`;
   const newRows = newItems.length
     ? newItems.map(x => `<div style="padding:7px 0;border-bottom:1px solid ${T.border}">
