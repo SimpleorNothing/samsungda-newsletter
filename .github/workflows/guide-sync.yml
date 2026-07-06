@@ -1,0 +1,63 @@
+name: Sync Newsletter Guide
+
+# 뉴스레터 사이트(src·설정)가 main에 반영되면
+# NEWSLETTER_GUIDE.md 상단 스탬프와 하단 변경 이력을 자동 적립한다.
+# 가이드·워크플로 자체 변경으로는 트리거되지 않아 재귀 루프가 없다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "wrangler.jsonc"
+      - "package.json"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-guide
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update stamp & changelog
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          FILE=NEWSLETTER_GUIDE.md
+          if [ ! -f "$FILE" ]; then echo "guide not found, skip"; exit 0; fi
+          STAMP="$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M (KST)')"
+          SHORT="$(printf '%s' "$COMMIT_SHA" | cut -c1-7)"
+          export STAMP SHORT
+          python3 - "$FILE" <<'PY'
+          import os, re, sys
+          file = sys.argv[1]
+          stamp = os.environ["STAMP"]
+          short = os.environ["SHORT"]
+          msg = os.environ.get("COMMIT_MSG", "").splitlines()[0].strip() if os.environ.get("COMMIT_MSG", "").strip() else "사이트 업데이트"
+          # 스킵 커밋은 이력에 남기지 않음
+          if "[skip ci]" in os.environ.get("COMMIT_MSG", ""):
+              sys.exit(0)
+          s = open(file, encoding="utf-8").read()
+          s = re.sub(r'^> 최종 업데이트:.*$', f'> 최종 업데이트: {stamp}', s, count=1, flags=re.M)
+          entry = f'- **{stamp}** — {msg} (`{short}`)'
+          if '## 변경 이력' in s:
+              s = re.sub(r'(## 변경 이력\n)', r'\1' + entry + '\n', s, count=1)
+          else:
+              s = s.rstrip() + '\n\n## 변경 이력\n' + entry + '\n'
+          open(file, "w", encoding="utf-8").write(s)
+          PY
+          if git diff --quiet -- "$FILE"; then
+            echo "변경 없음 — 커밋 생략"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          git commit -m "docs: NEWSLETTER_GUIDE 자동 갱신 (${SHORT}) [skip ci]"
+          git push
