@@ -1,6 +1,6 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 최종 업데이트: 2026-07-06 20:28 (KST)
+> 최종 업데이트: 2026-07-06 23:11 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -89,6 +89,11 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 - 매크로·소비심리 축은 §2-2 FRED·§2-6 ECOS가 담당.
 - **자동수집 우선순위**: ukwhitegoods RSS · GlobalSpec 뉴스레터 · ACHR News 폴링. CES·NIQ·컨설팅은 부정기 큐레이션. (시장조사 유료 리포트 Technavio·Fortune 등은 게이트로 자동 인용 부적합 → 제외.)
 
+### 2-10. 선택 소스 (env 키 미설정 · 필요 시 활성화)
+- **EIA API** (`EIA_API_KEY` · eia.gov 무료 · 선택): 미국 휘발유(가솔린) 가격. 美 소비여력·이동/물류비 프록시 → 원가·수요 시그널 보강.
+- **NewsAPI** (`NEWS_API_KEY` · newsapi.org 무료 · 선택): 실시간 뉴스. 시장 동향 보강(현 MI `news.json` 보완).
+- 둘 다 무료 티어. **현재 미연결** — 키 발급 후 env 설정하면 즉시 활성. 필요 시점에 붙임.
+
 ---
 
 ## 3. Insight 추출 (3계층)
@@ -147,6 +152,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-07-06 23:11 (KST)** — 선택 소스(§2-10) 추가: EIA API(美 휘발유 가격)·NewsAPI(실시간 뉴스). 무료 티어, 현재 미연결 — 필요 시 활성.
 - **2026-07-06 20:28 (KST)** — 소스 인벤토리에 가전 기술 트렌드(§2-8: CES/CTA·GlobalSpec·HomeWorld·ukwhitegoods RSS·OEM 뉴스룸)·연관 영향 산업(§2-9: ACHR News 냉매규제·NIQ/GfK·SupplyChainBrain·DOE/ENERGY STAR) 추가. 자동수집 우선순위 명시.
 - **2026-07-06 20:19 (KST)** — 데이터 소스 인벤토리에 한국은행(§2-6, ECOS 오픈API + 게시판 폴링)·글로벌 컨설팅사 인사이트(§2-7, McKinsey RSS 백본 + 8개사 부정기) 추가. C 유형(기술/경쟁)·수요/원가 보강 소스.
 - **2026-07-06 12:31 (KST)** — 배포 항목 정정: 수동 `wrangler deploy` → `deploy.yml` Actions 자동 배포(실제 상태 반영). 사이트 업데이트 시 이 가이드 스탬프·이력을 자동 적립하는 `guide-sync.yml` 워크플로 도입.
