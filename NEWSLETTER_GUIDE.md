@@ -1,6 +1,6 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 최종 업데이트: 2026-07-06 20:19 (KST)
+> 최종 업데이트: 2026-07-06 20:28 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -74,6 +74,21 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 - **부정기 큐레이션**: Deloitte · BCG · Bain · Accenture · PwC · Kearney · Roland Berger · Oliver Wyman — 이메일 뉴스레터 또는 서드파티 RSS 생성기 경유. 상당수 이메일 게이트(등록 필요).
 - **인용 규율**: 수치·발행일 반드시 확인. **균형 인용** — 컨설팅 낙관 전망엔 상반 데이터·caveat 병기(예: AI 가전 낙관치 ↔ BOK 이슈노트 "AI 생산성 효과 아직 불명확").
 
+### 2-8. 가전 기술 트렌드 (C 유형 · 기술/제품)
+- **CES / CTA** (`cta.tech`): 매년 1월 최대 가전·전자 트렌드 소스 — 오프라인 음성제어·Matter 생태계·AI 자율 조리·빌트인 미니멀 디자인. 삼성 Bespoke·경쟁사 신제품 공개. 연 1회 집중(부정기 큐레이션).
+- **GlobalSpec Appliance Technology** (`globalspec.com`): 제조·설계·부품·로보틱스·공급망 관점 기술 뉴스레터. 이메일 구독형 → 자동수집 가능.
+- **HomeWorld Business** (`homeworldbusiness.com`): 가전·하우스웨어 업계 전문지. Appliances/Retail/Financials/Trade Shows 카테고리.
+- **ukwhitegoods.co.uk**: 백색가전 업계 뉴스, **RSS 제공**(`?type=rss`) — 리콜·M&A·규제·가격담합 등 사건 중심. 자동 폴링 적합.
+- **OEM 뉴스룸**: GE Appliances(`pressroom.geappliances.com`)·Hisense·LG·Whirlpool — 경쟁사 신제품·전략 1차 소스. CI evidence 후보로 직결.
+
+### 2-9. 연관·영향 산업 (수요·원가·규제 채널)
+- **냉매·HVAC 규제 — ACHR News** (`achrnews.com`) ⭐: AIM Act에 따른 R-410A→R-454B/R-32 전환. R-410A 가격이 2022년 대비 40~70%↑, 신규 HVAC 장비가 시장별 15~25%↑ — 공조·냉장 원가에 직결. 2026.1 HFC 누출관리 규정 발효. **원가 시그널 보강 소스**.
+- **판매·소비 데이터 — NIQ / GfK** (`nielseniq.com`): T&D(가전·내구재) 판매추적. 중국 이구환신(trade-in), 교체 사이클, 세그먼트 지불의향.
+- **공급망·부품 — SupplyChainBrain** (`supplychainbrain.com`): 물류·부품·리쇼어링 동향(SCFI 운임과 상호보완).
+- **에너지 규제 — DOE / ENERGY STAR**: SEER2 등 효율 기준 → 제품 스펙·리베이트 자격 좌우.
+- 매크로·소비심리 축은 §2-2 FRED·§2-6 ECOS가 담당.
+- **자동수집 우선순위**: ukwhitegoods RSS · GlobalSpec 뉴스레터 · ACHR News 폴링. CES·NIQ·컨설팅은 부정기 큐레이션. (시장조사 유료 리포트 Technavio·Fortune 등은 게이트로 자동 인용 부적합 → 제외.)
+
 ---
 
 ## 3. Insight 추출 (3계층)
@@ -132,6 +147,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-07-06 20:28 (KST)** — 소스 인벤토리에 가전 기술 트렌드(§2-8: CES/CTA·GlobalSpec·HomeWorld·ukwhitegoods RSS·OEM 뉴스룸)·연관 영향 산업(§2-9: ACHR News 냉매규제·NIQ/GfK·SupplyChainBrain·DOE/ENERGY STAR) 추가. 자동수집 우선순위 명시.
 - **2026-07-06 20:19 (KST)** — 데이터 소스 인벤토리에 한국은행(§2-6, ECOS 오픈API + 게시판 폴링)·글로벌 컨설팅사 인사이트(§2-7, McKinsey RSS 백본 + 8개사 부정기) 추가. C 유형(기술/경쟁)·수요/원가 보강 소스.
 - **2026-07-06 12:31 (KST)** — 배포 항목 정정: 수동 `wrangler deploy` → `deploy.yml` Actions 자동 배포(실제 상태 반영). 사이트 업데이트 시 이 가이드 스탬프·이력을 자동 적립하는 `guide-sync.yml` 워크플로 도입.
 - **2026-07-06 07:13 (KST)** — 최초 저장. 07-05~06 발송본 개편 반영: 섹션 명칭(수요/원가 시그널·시장 동향·기획 인사이트), 히어로 '오늘의 맥락'→'오늘의 한 줄'(대응평가 제거·1~2문장 압축), CI 보드 연동, 추이 그래프 유불리 색·헤드룸.
