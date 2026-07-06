@@ -1,6 +1,6 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 최종 업데이트: 2026-07-06 07:13 (KST)
+> 최종 업데이트: 2026-07-06 12:31 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -14,7 +14,7 @@
 - **구독자**: R2 `subscribers/<sha256(email)>.json`. 신규 구독 시 확인 메일.
 - **라우트**: `/subscribe` · `/unsubscribe` · `/subscribers?key=` · `/preview` · `/send?key=` · `/latest` · `/refresh-freight?key=`.
 - **아카이브**: 발송분을 R2 `newsletter/{date}.html` + `latest.html` 저장 → 모음/회차 열람 페이지가 참조. 하단에 업데이트 내역 표시.
-- **배포**: Workers Builds 미연결 → main merge가 배포 트리거 안 함. **`npx wrangler deploy` 수동 필수**.
+- **배포**: `src/**`·`wrangler.jsonc`·`package.json`가 main에 push되면 GitHub Actions(`.github/workflows/deploy.yml`)가 Cloudflare Workers로 **자동 배포**. 수동 실행은 Actions 탭 → Run workflow(`workflow_dispatch`). (README 등 비관련 변경은 paths 필터로 배포 안 됨.)
 - **실발송 go-live는 hold** — 코드·PR·merge는 정상 진행, 공개 발송만 명시 요청 전까지 보류. 검증은 `/preview`·셀프테스트 전용.
 
 ---
@@ -122,4 +122,5 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-07-06 12:31 (KST)** — 배포 항목 정정: 수동 `wrangler deploy` → `deploy.yml` Actions 자동 배포(실제 상태 반영). 사이트 업데이트 시 이 가이드 스탬프·이력을 자동 적립하는 `guide-sync.yml` 워크플로 도입.
 - **2026-07-06 07:13 (KST)** — 최초 저장. 07-05~06 발송본 개편 반영: 섹션 명칭(수요/원가 시그널·시장 동향·기획 인사이트), 히어로 '오늘의 맥락'→'오늘의 한 줄'(대응평가 제거·1~2문장 압축), CI 보드 연동, 추이 그래프 유불리 색·헤드룸.
