@@ -9,7 +9,7 @@
 // 히어로: Claude API(claude-sonnet-4-5) 맥락 브리핑 — '오늘의 한 줄'(시장 동향과 그 의미를 연결한 1~2문장)
 //         + 소비/원가 섹션별 해석 한 줄 + 뉴스별 내용·기회·위협 각 한 줄. 모든 해석에 근거 지표 병기. 키 없으면 규칙 폴백. CTA 없음.
 // 구독: R2 "subscribers/<sha256(email)>.json". 발송: Resend(수신자별 개별).
-// 라우트: POST /subscribe · GET /unsubscribe · GET /subscribers?key= · /preview · /send?key= · /latest
+// 라우트: POST /subscribe · GET/POST /unsubscribe(GET=확인 페이지, POST=실제 해지) · GET /subscribers?key= · /preview · /send?key= · /latest
 // 인사이트: [누적신호] R2 signals/history.json 일별 스냅샷 축적 → 주간 델타·연속 스트릭·수요 분화(ITB↔XLY) 임계 감지. preview는 읽기전용, 실발송/cron만 기록.
 //           [CI라우팅] MI뉴스 → LG 전략축(A1~A6) 키워드 매칭 → LG 관련건 축 뱃지 + signals/ci-candidates.json 스테이징(사람 검토용, evidence.json 자동커밋 없음).
 //           [CI연동] competitor_intelligence 레포의 strategies.json·evidence.json(사람이 검토·확정한 사실)을 raw.githubusercontent.com에서 직접 읽어
@@ -254,7 +254,7 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
 
     if (url.pathname === "/subscribe" && request.method === "POST") return handleSubscribe(request, env);
-    if (url.pathname === "/unsubscribe") return handleUnsub(url, env);
+    if (url.pathname === "/unsubscribe") return handleUnsub(request, url, env);
 
     if (url.pathname === "/preview") {
       if (url.searchParams.get("refresh") === "freight") {
@@ -376,12 +376,23 @@ async function sendWelcome(env, email) {
     });
   } catch { /* 확인 메일 실패 무시 */ }
 }
-async function handleUnsub(url, env) {
-  const email = String(url.searchParams.get("e") || "").trim().toLowerCase();
-  const token = url.searchParams.get("t") || "";
+// 수신거부 2단계 — 사내 메일 보안 스캐너가 메일 속 링크를 GET으로 자동 클릭해 오탈퇴시키는 것을 방지.
+// GET: 삭제 없이 확인 페이지만 표시 → 버튼(POST) 클릭 시에만 실제 삭제.
+async function handleUnsub(request, url, env) {
+  let email, token;
+  if (request.method === "POST") {
+    const form = await request.formData().catch(() => null);
+    email = String((form && form.get("e")) || "").trim().toLowerCase();
+    token = String((form && form.get("t")) || "");
+  } else {
+    email = String(url.searchParams.get("e") || "").trim().toLowerCase();
+    token = url.searchParams.get("t") || "";
+  }
   const good = !!email && !!token && token === (await signToken(email, signKey(env)));
-  if (good) { try { await env.RESEARCH.delete(await subKey(email)); } catch { /* ignore */ } }
-  return htmlResp(unsubPage(good, email));
+  if (!good) return htmlResp(unsubPage("invalid", email));
+  if (request.method !== "POST") return htmlResp(unsubPage("confirm", email, token));
+  try { await env.RESEARCH.delete(await subKey(email)); } catch { /* ignore */ }
+  return htmlResp(unsubPage("done", email));
 }
 async function getSubscribers(env) {
   const out = [];
@@ -1448,10 +1459,21 @@ function welcomeEmail(pub, unsub) {
 </body></html>`;
 }
 
-function unsubPage(ok, email) {
-  const msg = ok
-    ? `<b>${email.replace(/[&<>"]/g, "")}</b> 님의 뉴스레터 수신이 해지되었습니다.`
-    : `유효하지 않은 링크입니다. 이미 해지되었거나 링크가 만료되었을 수 있습니다.`;
+function unsubPage(mode, email, token) {
+  const safe = (email || "").replace(/[&<>"]/g, "");
+  let msg;
+  if (mode === "done") {
+    msg = `<b>${safe}</b> 님의 뉴스레터 수신이 해지되었습니다.`;
+  } else if (mode === "confirm") {
+    msg = `<b>${safe}</b> 님, 기획 데일리 수신을 중단하시겠습니까?
+  <form method="POST" action="/unsubscribe" style="margin:20px 0 0">
+    <input type="hidden" name="e" value="${safe}">
+    <input type="hidden" name="t" value="${String(token || "").replace(/[&<>"]/g, "")}">
+    <button type="submit" style="background:${T.text};color:#fff;border:0;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">수신거부 확정</button>
+  </form>`;
+  } else {
+    msg = `유효하지 않은 링크입니다. 이미 해지되었거나 링크가 만료되었을 수 있습니다.`;
+  }
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"><title>수신거부</title></head>
 <body style="margin:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif;color:${T.text}">
