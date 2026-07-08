@@ -1438,7 +1438,7 @@ export function renderEmail(data, opts = {}) {
 ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.text};color:${T.bg};font-size:13px;font-weight:700;letter-spacing:.14em;padding:4px 10px">SAMPLE</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
-  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
+  <table role="presentation" width="756" cellpadding="0" cellspacing="0" style="max-width:756px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
       <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
@@ -1460,10 +1460,10 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
   </table>
-  <div style="max-width:600px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
+  <div style="max-width:756px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
     지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 일 1회 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 엑셀 seed + 누적 관측치 기준.
   </div>
-  <div style="max-width:600px;margin:14px auto 0;text-align:left">
+  <div style="max-width:756px;margin:14px auto 0;text-align:left">
     <span id="nlUpdWrap" style="position:relative;display:inline-block">
       <span id="nlUpdBtn" style="font-size:13px;color:${T.muted};cursor:pointer;user-select:none;font-variant-numeric:tabular-nums">update : ${CHANGELOG.length ? CHANGELOG[0].d : ""} &#9662;</span>
       <span id="nlUpdLog" style="display:none;position:absolute;left:0;bottom:calc(100% + 8px);width:340px;max-width:80vw;max-height:52vh;overflow:auto;background:${T.surface};border:1px solid ${T.border};box-shadow:0 12px 28px rgba(23,34,45,.16);padding:14px 14px 8px;z-index:50;text-align:left">
