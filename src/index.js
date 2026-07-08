@@ -97,6 +97,12 @@ const CI_AXES = [
   { code: "A5", id: "lg-a5", title: "지역 포트폴리오 재편", kw: ["인도", "관세", "글로벌사우스", "글로벌 사우스", "역내생산", "현지생산", "멕시코", "베트남", "동남아", "신흥시장", "ipo", "리쇼어링"] },
   { code: "A6", id: "lg-a6", title: "로봇 사업 본격화", kw: ["로봇", "휴머노이드", "액추에이터", "로보틱스", "협동로봇", "로보스타", "로보티즈", "베어로보틱스", "글로이드"] },
 ];
+const stripCiAxisCodes = v => String(v == null ? "" : v)
+  .replace(/\[((?:A[1-6]\s*(?:[\/,·]\s*)?)+)([^\]]*?)\]/g, (_, _codes, rest) => rest.trim())
+  .replace(/\bA[1-6]\b(?:\s*[\/,·]\s*\bA[1-6]\b)*/g, "")
+  .replace(/\s{2,}/g, " ")
+  .replace(/\s+([,.)\]은는이가을를에와과도])/g, "$1")
+  .trim();
 // 뉴스 항목 → 매칭된 축 배열(점수 내림차순). headline·summary·tags·products 표면 검색.
 function matchAxes(item) {
   const hay = [item.headline, item.summary, (item.tags || []).join(" "), (item.products || []).join(" ")].join(" ").toLowerCase();
@@ -1007,10 +1013,10 @@ function summaryContext(data) {
   const sig = (data.signals && data.signals.ready) ? data.signals.breaches : [];
   const sigTxt = sig.length ? sig.map(b => `- ${b.label}: ${b.detail}`).join("\n") : "없음 (누적 데이터 축적 중이거나 임계 미돌파)";
   const ciTxt = (data.ciCand || []).length
-    ? data.ciCand.map(c => `- [${c.axes.map(a => a.code).join("/")}] 「${c.headline}」`).join("\n")
+    ? data.ciCand.map(c => `- [${c.axes.map(a => a.title).join("/")}] 「${c.headline}」`).join("\n")
     : "없음";
   const ciBoardTxt = (data.ciBoard || []).length
-    ? data.ciBoard.map(c => `- [${c.axisCode}${c.axisTitle ? " " + c.axisTitle : ""}]${c.execStatus ? `(진행:${c.execStatus})` : ""} ${c.date}: ${c.event}${c.interpretation ? ` → ${c.interpretation}` : ""}`).join("\n")
+    ? data.ciBoard.map(c => `- [${c.axisTitle || "전략축"}]${c.execStatus ? `(진행:${c.execStatus})` : ""} ${c.date}: ${c.event}${c.interpretation ? ` → ${c.interpretation}` : ""}`).join("\n")
     : "없음";
   return `[지표 (해석은 6개월 추이 기준 — 시장지표에 6개월 델타 병기, 최근 전일/전월은 단기 보조; 물가·심리·주간·운임은 발표주기 델타)]\n- ${L.join("\n- ")}\n\n[누적 신호(주간 축적 대비)]\n${sigTxt}\n\n[CI 경쟁사 전략 추적 보드 — 검증된 최근 동향]\n${ciBoardTxt}\n\n[LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]\n${ciTxt}\n\n[가전 주요뉴스]\n${heads || "없음"}`;
 }
@@ -1098,7 +1104,7 @@ function sectionInsights(data) {
     const dom = Object.entries(lc).sort((a, b) => b[1] - a[1])[0];
     const head = topProd.length ? `${topProd.join("·")} 관련 소식이 주를 이룸` : "가전 전반 동향";
     const compPart = comp.length ? `, ${comp.join("·")} 중심` : "";
-    const axPart = topAx.length ? ` — LG 전략축 ${topAx.map(a => `${a.code}(${a.title})`).join("·")}에 닿는 신호` : "";
+    const axPart = topAx.length ? ` — ${topAx.map(a => a.title).join("·")} 흐름에 닿는 신호` : "";
     const lensPart = dom ? `, ${dom[0]} 비중이 큼` : "";
     news = `${head}${compPart}${axPart}${lensPart} (${nv.length}건)`;
   }
@@ -1143,7 +1149,7 @@ async function aiSummary(env, data) {
             "  · 프록시 해석: 홈빌더ETF(ITB) 상승/모기지 하락 = 주택·빌트인 수요 개선 신호 / 실업수당청구 증가 = 소비여력 둔화 신호. 프록시는 시장 기대의 대리지표이므로 '~신호'·'~여건' 수준으로 서술하고 확정적 수요 단정은 피한다.",
             "- cost: 원가 환경(유가·철강·원자재·환율·운임 SCFI/FBX)이 손익에 갖는 의미 한 문장(명사형 마무리) + 괄호로 근거 지표 병기. 전체 75자 이내. 유가·철강·구리·환율은 6개월 추이 방향으로 해석하고 괄호에 6개월 델타 병기(예: 'WTI 6M +18%·철강 6M +6%·원/달러 6M +6%'). 운임은 발표주기 특성상 SCFI/FBX 전주比로 서술 — SCFI는 상하이발(중국 수출) 컨테이너 운임, FBX는 글로벌 컨테이너 운임.",
             "  · 유가·철강 등 원가가 6개월 기준 상승했더라도 최근 고점 대비 되돌아왔다면 '6개월 높지만 고점 대비 진정' 식으로 국면(상승 지속 vs 고점 후 조정)을 구분해 서술한다.",
-            "- newsSummary: 오늘 가전 주요뉴스를 관통하는 핵심 의미 한 문장(명사형 마무리). 건수·개별 제목 나열 금지 — 무엇에 관한 소식이 주를 이루는지 주제를 짚는다(예: 'B2B 공조·에어컨 확대 흐름', 'LG 빌트인 통한 B2B 확장'). [LG 전략축 관련 뉴스]가 제공되면 어느 축(예: A2 HVAC·AIDC)에 닿는 흐름인지 한 번 명시한다. 전체 90자 이내. 뉴스가 없으면 빈 문자열.",
+            "- newsSummary: 오늘 가전 주요뉴스를 관통하는 핵심 의미 한 문장(명사형 마무리). 건수·개별 제목 나열 금지 — 무엇에 관한 소식이 주를 이루는지 주제를 짚는다(예: 'B2B 공조·에어컨 확대 흐름', 'LG 빌트인 통한 B2B 확장'). [LG 전략축 관련 뉴스]가 제공되면 어느 전략 흐름(예: HVAC·AIDC 확장)에 닿는지 한 번 명시한다. A1~A6 같은 내부 코드명은 출력하지 않는다. 전체 90자 이내. 뉴스가 없으면 빈 문자열.",
             "- news: 제공된 뉴스 각각에 대해 세 필드를 작성(idx는 뉴스 번호). 뉴스가 없으면 빈 배열.",
             "  · content: 기사 내용 — 이 소식이 무엇인지 시장·정책·경쟁 구도 차원의 핵심을 명사형(체언)으로 끝맺는 한 구(60자 이내). 항상 채운다.",
             "  · opportunity: 두 번째 화살표 — 당사의 현황·강점·포지션(수요·원가·제품 포트폴리오·역외 거점 관점)을 짚어 이 소식이 당사에 유리하게 작용하는 지점을 한 구(80자 이내)로 쓴다. '기회:' 같은 라벨을 쓰지 말고, '~다/~된다/~있다' 같은 서술형 종결 없이 명사형(체언)으로 끝맺는다. 소식 내용에 맞는 자연스러운 워딩으로 담되, 매 호 모든 뉴스가 똑같은 문형으로 읽히지 않도록 도입부를 항목마다 바꿔 쓴다. 도입은 '당사'에만 매이지 말고 '당사도'·'당사 입장'·'우리 DA'·'당사 관점' 등에서 돌려 쓰며, 같은 호 안에서 동일 도입·동일 명사 종결을 반복하지 않는다. 유리한 단서가 약하면 빈 문자열 대신 '당사에 유리하게 읽을 단서는 제한적'처럼 근거 부족을 명사형으로 적는다.",
@@ -1161,7 +1167,7 @@ async function aiSummary(env, data) {
             "  · '지속'·'추세'·'회복' 같은 시계열 표현은 6개월 델타(시장지표) 또는 전년/전월/전주 델타(물가·심리·주간·운임)로 뒷받침될 때 사용한다. 하루치 스냅샷 하나로 추세를 단정하지 않는다.",
             "- [누적 신호(주간 축적 대비)]가 제공되면 hero에서 우선 활용한다 — 오늘 스냅샷이 아니라 '무엇이 며칠에 걸쳐 방향을 틀었는지'가 인사이트의 핵심. 이 블록의 방향·해석을 넘어서는 추가 단정은 하지 않는다.",
             "- [CI 경쟁사 전략 추적 보드 — 검증된 최근 동향]은 사람이 검토·확정한 사실(evidence.json)이다. [LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]보다 신뢰도가 높으므로, 겹치는 주제가 있으면 이 블록을 우선 근거로 삼는다. hero 또는 관련 뉴스의 content/threat에서 어느 전략축이 어떤 진행 상태(가속/순항/지연/방향전환)에 있는지 실제로 반영해 서술하되, 여기 없는 축·진행 상황은 창작하지 않는다.",
-            "- [LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]가 제공되면 hero 또는 해당 뉴스의 content/threat에서 어느 전략축(예: A2 HVAC·AIDC)에 닿는 신호인지 한 번 짚어준다. 다만 제공된 헤드라인·요약 범위 안에서만 서술하고 축 진행 상황을 창작하지 않는다. 이 블록은 아직 사람이 검토하지 않은 후보이므로 확정된 사실처럼 단정하지 않는다.",
+            "- [LG 전략축 관련 뉴스 — 오늘 매칭·미검증 후보]가 제공되면 hero 또는 해당 뉴스의 content/threat에서 어느 전략 흐름(예: HVAC·AIDC 확장)에 닿는 신호인지 한 번 짚어준다. A1~A6 같은 내부 코드명은 출력하지 않는다. 다만 제공된 헤드라인·요약 범위 안에서만 서술하고 축 진행 상황을 창작하지 않는다. 이 블록은 아직 사람이 검토하지 않은 후보이므로 확정된 사실처럼 단정하지 않는다.",
           ].join("\n"),
           messages: [{ role: "user", content: summaryContext(data) }],
         }),
@@ -1173,14 +1179,14 @@ async function aiSummary(env, data) {
         const mm = cleaned.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(mm ? mm[0] : cleaned);
         const rs = sectionInsights(data);
-        const str = (v, n) => typeof v === "string" ? v.trim().slice(0, n) : "";
+        const str = (v, n) => typeof v === "string" ? stripCiAxisCodes(v).slice(0, n) : "";
         const newsWhy = {};
         for (const it of (Array.isArray(parsed.news) ? parsed.news : [])) {
           if (!it || !Number.isInteger(it.idx)) continue;
-          const content = typeof it.content === "string" ? it.content.trim().slice(0, 110) : "";
-          const opportunity = typeof it.opportunity === "string" ? it.opportunity.trim().slice(0, 110) : "";
-          const threat = typeof it.threat === "string" ? it.threat.trim().slice(0, 110) : "";
-          const legacy = typeof it.why === "string" ? it.why.trim().slice(0, 110) : "";
+          const content = typeof it.content === "string" ? stripCiAxisCodes(it.content).slice(0, 110) : "";
+          const opportunity = typeof it.opportunity === "string" ? stripCiAxisCodes(it.opportunity).slice(0, 110) : "";
+          const threat = typeof it.threat === "string" ? stripCiAxisCodes(it.threat).slice(0, 110) : "";
+          const legacy = typeof it.why === "string" ? stripCiAxisCodes(it.why).slice(0, 110) : "";
           if (content || opportunity || threat || legacy) newsWhy[it.idx] = { content: content || legacy, opportunity, threat };
         }
         const hero = str(parsed.hero, 180);
@@ -1373,7 +1379,7 @@ export function renderEmail(data, opts = {}) {
   // 콘텐츠
   const newsWhyRows = (w, fallbackContent = "") => {
     const o = typeof w === "string" ? { content: w, opportunity: "", threat: "" } : (w || {});
-    const row = (text, color, marker = "•") => `<div style="margin-top:5px;padding-left:16px;text-indent:-16px;font-size:13px;color:${T.text};line-height:1.7"><span style="display:inline-block;width:16px;text-indent:0;color:${color};font-weight:700">${marker}</span>${esc(text)}</div>`;
+    const row = (text, color, marker = "•") => `<div style="margin-top:5px;padding-left:16px;text-indent:-16px;font-size:13px;color:${T.text};line-height:1.7"><span style="display:inline-block;width:16px;text-indent:0;color:${color};font-weight:700">${marker}</span>${esc(stripCiAxisCodes(text))}</div>`;
     return row(o.content || fallbackContent || "기사 요약 정보 제한적", T.text)
       + row(o.opportunity || "당사에 유리하게 읽을 단서는 제한적", T.brand, "→")
       + row(o.threat || "당장 부담으로 이어질 단서는 제한적", T.up, "→");
@@ -1412,6 +1418,7 @@ export function renderEmail(data, opts = {}) {
         <a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newIcon(x.kind)}${esc(x.title)}</a></div>`).join("")
     : `<div style="font-size:13px;color:${T.muted}">지난 1주 신규 아이디어·보고서 없음</div>`;
 
+  const costSignalIcon = `<span style="display:inline-block;width:15px;height:15px;margin-right:6px;vertical-align:-2px;line-height:0"><svg width="15" height="15" viewBox="0 0 32 32" fill="none" role="img" aria-label="원가"><circle cx="16" cy="16" r="14" stroke="${T.brand}" stroke-width="2"/><circle cx="16" cy="16" r="11" stroke="${T.brand}" stroke-width="1.6"/><path d="M16 6.5v19" stroke="${T.brand}" stroke-width="2" stroke-linecap="round"/><path d="M21.2 10.8c-1.2-1.3-3-2-5.1-2-2.8 0-5 1.5-5 3.8 0 2.2 1.9 3 5.3 3.8 3.1.8 4.6 1.5 4.6 3.6 0 2.4-2.2 4-5.3 4-2.3 0-4.3-.8-5.8-2.3" stroke="${T.brand}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
       <div style="margin-top:8px">${body}</div></td></tr>`;
@@ -1456,7 +1463,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     </td></tr>
     ${sigStrip}
     ${section("🛒 수요 시그널", consumeTrend + consume, "", true, sm.sec.consume)}
-    ${section("💰 원가 시그널", costTrend + cost, "", false, sm.sec.cost)}
+    ${section(`${costSignalIcon}원가 시그널`, costTrend + cost, "", false, sm.sec.cost)}
     ${section("📰 시장 동향", newsRows, "", false, sm.sec.news)}
     ${insightsSection}
     ${section("🆕 기획 인사이트", newRows)}
