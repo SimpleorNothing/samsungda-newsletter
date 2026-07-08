@@ -13,18 +13,33 @@ async function sha256hex(s) {
   return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
 }
 
-// Resend 단건 발송 — id 반환 + Idempotency-Key 지원. 실패 시 { ok:false, error }.
+// Resend는 초당 2건(2 req/s) 제한 — 전 발송(뉴스레터·리포트)을 최소 간격으로 스페이싱하고,
+// 429는 Retry-After를 존중해 백오프 재시도한다. 모듈 전역 _lastSendAt로 실행 내내 간격을 강제.
+let _lastSendAt = 0;
+async function _spaceOut(minGapMs = 600) {
+  const wait = _lastSendAt + minGapMs - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  _lastSendAt = Date.now();
+}
+
+// Resend 단건 발송 — id 반환 + Idempotency-Key + 레이트리밋 스로틀/429 재시도. 실패 시 { ok:false, error }.
 export async function sendResendIdem(env, { to, subject, html, idem }) {
   const headers = { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" };
   if (idem) headers["Idempotency-Key"] = idem;
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [to], subject, html }),
-  });
-  const j = await res.json().catch(() => ({}));
-  if (res.ok) return { ok: true, id: j.id };
-  return { ok: false, error: j.message || res.status };
+  const body = JSON.stringify({ from: env.FROM || "기획 도구모음 <newsletter@samsungda.net>", to: [to], subject, html });
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await _spaceOut();
+    const res = await fetch("https://api.resend.com/emails", { method: "POST", headers, body });
+    if (res.status === 429) {  // 레이트리밋 — Retry-After(초) 존중 후 재시도
+      const ra = Number(res.headers.get("retry-after"));
+      await new Promise((r) => setTimeout(r, Math.max(1200, (ra || 1) * 1000)));
+      continue;
+    }
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) return { ok: true, id: j.id };
+    return { ok: false, error: j.message || res.status };
+  }
+  return { ok: false, error: "레이트리밋 재시도 초과(429)" };
 }
 
 // 발송결과 일일 리포트 — 관리자(REPORT_TOS 전원)에게 요약 메일. 실패해도 발송 흐름엔 영향 없음.
