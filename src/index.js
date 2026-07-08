@@ -16,6 +16,8 @@
 //                     AI 요약 프롬프트에 "검증된 최근 동향"으로 제공 — 위 CI라우팅(미검증 후보)보다 우선 신뢰.
 
 import { SCFI_SEED } from "./scfi-seed.js";
+import { refreshInsights } from "./insights.js";
+import { runSendWithReconcile } from "./postsend.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
@@ -33,6 +35,16 @@ const SIG_KEY = "signals/history.json";        // 일별 지표 스냅샷 누적
 const SCFI_HIST_KEY = "signals/scfi-history.json"; // SCFI 종합지수 주간 관측 누적(seed 이후 web_search 갱신분) — 6개월 추이용
 const CI_CAND_KEY = "signals/ci-candidates.json"; // LG 전략축 관련 뉴스 스테이징(CI 센싱 inbox 후보, 사람 검토)
 const FRED_CACHE_PREFIX = "signals/fred/"; // FRED 공식 API 성공 응답 캐시(일시 실패 시 직전 성공값 사용)
+const INSIGHTS_KEY = "signals/insights-feed.json"; // 리서치 인사이트(컨설팅·한국은행 보고서) 큐레이션 피드 — R2에 있으면 우선, 없으면 아래 SEED. 안정화 후 자동수집이 R2를 채워 seed 대체.
+// 리서치 인사이트 초기 큐레이션 seed — 수/금(C유형)에 노출. url/image는 큐레이션 시 실제 리포트 링크·og:image로 교체.
+const INSIGHTS_SEED = [
+  { source: "McKinsey", domain: "mckinsey.com", date: "2026.06", title: "기술 가속과 비용 압박이 충돌하는 소비 환경, 브랜드 노출은 생성형 검색이 재편", stat: "1%", cap: "LLM 인용 소스 중 소비재 브랜드 자사 웹 비중 — 생성형 엔진 최적화(GEO)가 새 과제", impl: "당사도 AI홈·D2C 콘텐츠가 생성형 검색에 노출되도록 GEO 관점을 제품 정보 구조에 반영할 여지.", url: "https://www.mckinsey.com/capabilities/growth-marketing-and-sales/our-insights", image: "" },
+  { source: "Deloitte", domain: "deloitte.com", date: "2026.06", title: "소비재 기업의 7대 변화 — SKU 합리화·조직 단순화·에이전틱 AI 도입 가속", stat: "68%", cap: "향후 12~24개월 내 에이전틱 AI 도입을 예상한 리테일 임원 비중", impl: "우리 DA엔 볼륨존 SKU 정리·조직 효율화가 원가 방어와 맞물리는 흐름으로 참고.", url: "https://www.deloitte.com/global/en/Industries/consumer/analysis/consumer-products-industry-outlook.html", image: "" },
+  { source: "Deloitte", domain: "deloitte.com", date: "2025", title: "스마트홈, 상호운용성과 데이터 신뢰가 지출을 좌우", stat: "79%", cap: "스마트홈 사용자가 상호운용성을 '중요'로 평가 · 데이터 책임성 우수 사업자는 기기 지출 연 62%↑", impl: "당사 관점에선 SmartThings 개방형 연동(Matter)과 데이터 신뢰가 프리미엄 지출의 지렛대.", url: "https://www.deloitte.com/us/en/insights/industry/technology/connectivity-mobile-trends-survey.html", image: "" },
+  { source: "한국은행", domain: "bok.or.kr", date: "2026.06.23", title: "소비심리 3개월째 개선, 내구재 교체 수요 저점 통과 신호", stat: "106.6", cap: "6월 소비자심리지수(CCSI), 전월 +0.5p — 기준선 100 상회", impl: "국내 프리미엄·빌트인 교체 수요의 심리 여건 개선 국면, 신제품 출시 타이밍 참고.", url: "https://www.bok.or.kr/portal/bbs/B0000338/list.do?menuNo=200091", image: "" },
+  { source: "한국은행", domain: "bok.or.kr", date: "2026.06.17", title: "BOK 이슈노트 2026-14 — 가계 소비 양극화 심화", stat: "양극화", cap: "상·하위 가계의 소비 여력·성향 격차 확대가 파급영향으로 분석", impl: "한편 이는 프리미엄(Bespoke)·볼륨존 이원화 전략의 근거 데이터로 활용 가능.", url: "https://www.bok.or.kr/portal/bbs/P0002454/list.do?menuNo=200433", image: "" },
+  { source: "균형 관점", domain: "bok.or.kr", date: "2026.06.07", title: "BOK 이슈노트 2026-12 — AI 도입은 생산성을 높이는가(초기 3년)", stat: "초기", cap: "생성형 AI 확산에도 거시 생산성 개선은 아직 관찰되지 않는다는 분석", impl: "경쟁 측면에선 'AI 가전' 서사의 실효를 과신하지 않는 균형이 필요 — 위 컨설팅 낙관치의 반대 근거.", url: "https://www.bok.or.kr/portal/bbs/P0002454/list.do?menuNo=200433", image: "" },
+];
 const UA = { headers: { "User-Agent": "Mozilla/5.0" } };
 const GRADE_W = { "긴급": 3, "주요": 2, "주시": 1, "참고": 0 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -59,7 +71,7 @@ const FRED_WEEKLY = {
 const T = {
   bg: "#EDEFEC", surface: "#FFFFFF", text: "#17222D",
   muted: "#5C6B79", border: "#D3D9D6", brand: "#46647E",
-  up: "#B02E24", down: "#46647E",
+  up: "#B02E24", down: "#46647E", deep: "#2F614D", amber: "#A9790F",
 };
 
 // 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
@@ -165,6 +177,13 @@ async function loadScfiHistory(env) {
   try { const o = await env.RESEARCH.get(SCFI_HIST_KEY); if (o) { const a = await o.json(); return Array.isArray(a) ? a : []; } } catch { /* 무시 */ }
   return [];
 }
+// 리서치 인사이트 피드: R2 큐레이션 파일 우선, 없으면 SEED(초기 큐레이션). 안정화 후 자동수집이 R2를 채우면 seed 자동 대체.
+async function loadInsights(env) {
+  if (env.RESEARCH) {
+    try { const o = await env.RESEARCH.get(INSIGHTS_KEY); if (o) { const a = await o.json(); if (Array.isArray(a) && a.length) return a; } } catch { /* 무시 → seed 폴백 */ }
+  }
+  return INSIGHTS_SEED;
+}
 // web_search로 얻은 SCFI 최신치를 발표일(asof) 기준으로 R2 누적에 upsert. 같은 날짜는 갱신(재실행 안전).
 async function persistScfiObservation(env, scfi) {
   if (!env.RESEARCH || !scfi || scfi.value == null || !isFinite(scfi.value)) return;
@@ -253,7 +272,10 @@ function analyzeSignals(history, data) {
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(run(env, { send: true }));
+    ctx.waitUntil((async () => {
+      await refreshInsights(env);   // 리서치 인사이트 주간 자동수집(가드 내장) — 발송과 독립된 데이터 갱신
+      await run(env, { send: true });
+    })());
   },
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -268,6 +290,11 @@ export default {
           return new Response("forbidden", { status: 403 });
         await refreshFreight(env, { force: true });
       }
+      if (url.searchParams.get("refresh") === "insights") {
+        if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+          return new Response("forbidden", { status: 403 });
+        await refreshInsights(env, { force: true });
+      }
       return htmlResp(await buildEmail(env));
     }
     if (url.pathname === "/refresh-freight") {
@@ -275,6 +302,11 @@ export default {
         return new Response("forbidden", { status: 403 });
       await refreshFreight(env, { force: true });
       return json({ ok: true, freight: await getFreight(env) });
+    }
+    if (url.pathname === "/refresh-insights") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      return json(await refreshInsights(env, { force: url.searchParams.get("force") !== "0" }));
     }
     if (url.pathname === "/send") {
       if (env.TRIGGER_KEY && url.searchParams.get("key") !== env.TRIGGER_KEY)
@@ -408,9 +440,16 @@ async function getSubscribers(env) {
     do {
       const listed = await env.RESEARCH.list({ prefix: SUB_PREFIX, cursor });
       for (const o of (listed.objects || [])) {
-        const obj = await env.RESEARCH.get(o.key);
-        if (!obj) continue;
-        try { const r = await obj.json(); if (r && r.email) out.push(r.email.toLowerCase()); } catch { /* skip */ }
+        // 일시적 R2 read miss로 구독자가 조용히 누락되던 문제 방지 — 최대 3회 재시도.
+        let email = null;
+        for (let attempt = 0; attempt < 3 && !email; attempt++) {
+          try {
+            const obj = await env.RESEARCH.get(o.key);
+            if (obj) { const r = await obj.json(); if (r && r.email) email = r.email.toLowerCase(); }
+          } catch { /* 재시도 */ }
+        }
+        if (email) out.push(email);
+        else console.warn("getSubscribers: 구독자 객체 read 실패(스킵됨) key=" + o.key);
       }
       cursor = listed.truncated ? listed.cursor : null;
     } while (cursor);
@@ -440,27 +479,17 @@ async function run(env, { send }) {
   await persistCiCandidates(env, data);
 
   if (!send) return { ok: true, sent: false };
-  if (!env.RESEND_API_KEY) return { ok: false, error: "RESEND_API_KEY 미설정" };
-  const to = await allRecipients(env);
-  if (!to.length) return { ok: false, error: "수신자 없음" };
-
-  const subject = `📊 기획 데일리 · ${data.date} (${kstWeekday(data.date)})`;
-  let sent = 0, failed = 0; const errs = [];
-  for (const email of to) {
-    const token = await signToken(email, signKey(env));
-    const link = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
-    const html = base.split("__UNSUB__").join(link);
-    const r = await sendResend(env, { to: email, subject, html });
-    if (r.ok) sent++;
-    else { failed++; errs.push(r.error); }
-  }
-  return { ok: failed === 0, sent, failed, errors: errs.slice(0, 3) };
+  // 발송 2-pass(재대조 재발송) + 일일 발송리포트 → postsend.js 위임
+  return runSendWithReconcile(env, {
+    data, base, pub,
+    deps: { allRecipients, signToken, signKey, kstWeekday },
+  });
 }
 
 // ---------- 데이터 수집 ----------
 async function gatherData(env) {
   const symbols = ["KRW=X", "MXN=X", "THB=X", "VND=X", "INR=X", "PLN=X", "CL=F", "HG=F", "^TNX", "ITB", "XLY"];
-  const [yq, macro, freight, newsPool, ideas, reports, sigHist, scfiHist, ciBoard] = await Promise.all([
+  const [yq, macro, freight, newsPool, ideas, reports, sigHist, scfiHist, ciBoard, insights] = await Promise.all([
     Promise.all(symbols.map(yahoo)),
     getMacro(env),
     getFreight(env),
@@ -470,11 +499,12 @@ async function gatherData(env) {
     loadSignalHistory(env),
     loadScfiHistory(env),
     getCiBoard(),
+    loadInsights(env),
   ]);
   const q = {}; symbols.forEach((s, i) => q[s] = yq[i]);
   const news = selectNews(newsPool || []);
   await Promise.all(news.map(async n => { n.image = await fetchOgImage(n.url); }));
-  const data = { date: kstDate(), q, macro, freight, news, ideas, reports, ciBoard };
+  const data = { date: kstDate(), q, macro, freight, news, ideas, reports, ciBoard, insights };
   data.signals = analyzeSignals(sigHist, data);
   // SCFI 6개월 추이: 엑셀 seed + R2 누적(web_search 갱신분) + 오늘 관측치를 날짜로 병합 → 추이셀.
   if (data.freight && data.freight.scfi) {
@@ -1356,14 +1386,13 @@ export function renderEmail(data, opts = {}) {
   };
   const newsRows = data.news.length
     ? data.news.map((i, ni) => {
-        const axBadges = "";
         const thumb = i.image
           ? `<td width="92" valign="top" style="padding:8px 0 8px 12px;width:92px"><a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none"><img src="${esc(i.image)}" width="92" height="72" alt="" style="display:block;width:92px;height:72px;object-fit:cover;border:1px solid ${T.border};background:${T.bg}"></a></td>`
           : "";
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
-        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>${axBadges}
-        ${newsWhyRows(sm.newsWhy[ni], stripCiAxisCodes(i.summary || ""))}
+        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>
+        ${newsWhyRows(sm.newsWhy[ni], i.summary || "")}
         </td>${thumb}
         </tr></table>`;
       }).join("")
@@ -1394,6 +1423,26 @@ export function renderEmail(data, opts = {}) {
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
       <div style="margin-top:8px">${body}</div></td></tr>`;
 
+  // 🔬 리서치 인사이트(컨설팅·한국은행 보고서) — 발송은 수/금(C유형), preview(sample)는 요일 무관 항상 노출. 로고=favicon, 출처색은 CI 팔레트로 구분.
+  const insDow = kstWeekday(data.date);
+  const showIns = opts.sample || insDow === "수" || insDow === "금";
+  const insList = Array.isArray(data.insights) ? data.insights : [];
+  const srcCol = src => (src && src.indexOf("한국은행") >= 0) ? T.deep : ((src && src.indexOf("균형") >= 0) ? T.amber : T.brand);
+  const insCards = insList.slice(0, 6).map(it => {
+    const col = srcCol(it.source);
+    const logo = it.domain ? `<img src="https://www.google.com/s2/favicons?sz=64&domain=${esc(it.domain)}" width="15" height="15" alt="" style="vertical-align:middle;border-radius:3px;margin-right:6px">` : "";
+    const stat = it.stat ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:9px 0"><tr><td style="padding:9px 11px;background:${T.bg};border-radius:8px"><span style="font-size:18px;font-weight:800;color:${col};vertical-align:middle">${esc(it.stat)}</span> <span style="font-size:12px;color:${T.muted};line-height:1.5">${esc(it.cap || "")}</span></td></tr></table>` : "";
+    const thumb = it.image ? `<img src="${esc(it.image)}" alt="" width="100%" style="width:100%;max-height:130px;object-fit:cover;border-radius:8px;margin:9px 0 0;display:block">` : "";
+    const link = it.url ? `<div style="margin-top:9px"><a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;font-weight:600;color:${col};text-decoration:none">원문 보기 &rarr;</a></div>` : "";
+    return `<div style="border:1px solid ${T.border};border-radius:11px;padding:14px 15px;margin-bottom:11px">
+      <div style="margin-bottom:8px">${logo}<span style="display:inline-block;font-size:10.5px;font-weight:800;color:#fff;background:${col};padding:3px 9px;border-radius:5px;vertical-align:middle">${esc(it.source || "")}</span> <span style="font-size:10.5px;font-weight:600;color:${T.muted};vertical-align:middle">${esc(it.date || "")}</span></div>
+      <div style="font-size:13.5px;font-weight:700;color:${T.text};line-height:1.5">${esc(it.title || "")}</div>
+      ${stat}${thumb}
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:6px"><tr><td valign="top" style="color:${col};font-weight:700;font-size:12px;padding-right:6px">&rarr;</td><td style="font-size:12px;color:${T.text};line-height:1.6">${esc(it.impl || "")}</td></tr></table>
+      ${link}</div>`;
+  }).join("");
+  const insightsSection = (showIns && insCards) ? section("🔬 리서치 인사이트", insCards, "컨설팅·한국은행 최근 발행", false) : "";
+
   return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"></head>
 <body style="margin:0;padding:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
@@ -1416,6 +1465,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${section("🛒 수요 시그널", consumeTrend + consume, "", true, sm.sec.consume)}
     ${section(`${costSignalIcon}원가 시그널`, costTrend + cost, "", false, sm.sec.cost)}
     ${section("📰 시장 동향", newsRows, "", false, sm.sec.news)}
+    ${insightsSection}
     ${section("🆕 기획 인사이트", newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
