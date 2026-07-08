@@ -16,6 +16,7 @@
 //                     AI 요약 프롬프트에 "검증된 최근 동향"으로 제공 — 위 CI라우팅(미검증 후보)보다 우선 신뢰.
 
 import { SCFI_SEED } from "./scfi-seed.js";
+import { refreshInsights } from "./insights.js";
 import { runSendWithReconcile } from "./postsend.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
@@ -265,7 +266,10 @@ function analyzeSignals(history, data) {
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(run(env, { send: true }));
+    ctx.waitUntil((async () => {
+      await refreshInsights(env);   // 리서치 인사이트 주간 자동수집(가드 내장) — 발송과 독립된 데이터 갱신
+      await run(env, { send: true });
+    })());
   },
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -280,6 +284,11 @@ export default {
           return new Response("forbidden", { status: 403 });
         await refreshFreight(env, { force: true });
       }
+      if (url.searchParams.get("refresh") === "insights") {
+        if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+          return new Response("forbidden", { status: 403 });
+        await refreshInsights(env, { force: true });
+      }
       return htmlResp(await buildEmail(env));
     }
     if (url.pathname === "/refresh-freight") {
@@ -287,6 +296,11 @@ export default {
         return new Response("forbidden", { status: 403 });
       await refreshFreight(env, { force: true });
       return json({ ok: true, freight: await getFreight(env) });
+    }
+    if (url.pathname === "/refresh-insights") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      return json(await refreshInsights(env, { force: url.searchParams.get("force") !== "0" }));
     }
     if (url.pathname === "/send") {
       if (env.TRIGGER_KEY && url.searchParams.get("key") !== env.TRIGGER_KEY)
