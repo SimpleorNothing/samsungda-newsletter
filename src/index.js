@@ -1405,9 +1405,9 @@ export function renderEmail(data, opts = {}) {
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
       <div style="margin-top:8px">${body}</div></td></tr>`;
 
-  // 🔬 리서치 인사이트(컨설팅·한국은행 보고서) — 수/금(C유형)에만 노출. 로고=favicon, 출처색은 CI 팔레트로 구분.
+  // 🔬 리서치 인사이트(컨설팅·한국은행 보고서) — 발송은 수/금(C유형), preview(sample)는 요일 무관 항상 노출. 로고=favicon, 출처색은 CI 팔레트로 구분.
   const insDow = kstWeekday(data.date);
-  const showIns = insDow === "수" || insDow === "금";
+  const showIns = opts.sample || insDow === "수" || insDow === "금";
   const insList = Array.isArray(data.insights) ? data.insights : [];
   const srcCol = src => (src && src.indexOf("한국은행") >= 0) ? T.deep : ((src && src.indexOf("균형") >= 0) ? T.amber : T.brand);
   const insCards = insList.slice(0, 6).map(it => {
