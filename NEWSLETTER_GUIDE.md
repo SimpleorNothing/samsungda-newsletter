@@ -1,6 +1,6 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 최종 업데이트: 2026-07-09 00:05 (KST)
+> 최종 업데이트: 2026-07-09 00:06 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -153,6 +153,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-07-09 00:06 (KST)** — 하드코딩 CHANGELOG를 changelog.js import로 전환 (#107) (`3f707bd`)
 - **2026-07-09 00:05 (KST)** — 소스 인벤토리 §2-7에 Deloitte Korea 인사이트 허브(`deloitte.com/kr`, 한국어) 추가. 인사이트 리포트·월간 Trend Tracker·주간 글로벌 경제리뷰·Consumer Signals. 리스트에 발행일 미표기 → Trend Tracker(월)·경제리뷰(주차)로 발간 시점 앵커링.
 - **2026-07-08 23:53 (KST)** — feat: CHANGELOG를 changelog.js로 분리 (자동 적립 마커 포함) (#105) (`13c9cbc`)
 - **2026-07-08 23:16 (KST)** — Merge pull request #97 from SimpleorNothing/codex/cost-signal-icon (`9ff6489`)
