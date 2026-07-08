@@ -18,6 +18,7 @@
 import { SCFI_SEED } from "./scfi-seed.js";
 import { refreshInsights } from "./insights.js";
 import { runSendWithReconcile } from "./postsend.js";
+import { CHANGELOG } from "./changelog.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
@@ -73,20 +74,6 @@ const T = {
   muted: "#5C6B79", border: "#D3D9D6", brand: "#46647E",
   up: "#B02E24", down: "#46647E", deep: "#2F614D", amber: "#A9790F",
 };
-
-// 변경이력(최신순) — 뉴스레터 본문 하단 · 뉴스레터 모음 페이지가 함께 참조. 다른 도구모음과 동일 패턴.
-const CHANGELOG = [
-  { d: "2026.07.06", t: "히어로를 '오늘의 맥락' → '오늘의 한 줄'로 개편 — 대응방안·손익영향 평가 대신 시장 동향과 그 의미를 1~2문장으로 압축" },
-  { d: "2026.07.05", t: "'오늘의 맥락' AI 요약이 CI(경쟁사 전략 추적) 보드의 검증된 최근 동향을 실제로 참고하도록 연동" },
-  { d: "2026.07.05", t: "추이 그래프 상단 헤드룸(기본 70%·우측 끝 최고점이면 65%) — 최신값이 최고점일 때 값 라벨이 그래프 위쪽에 앉도록" },
-  { d: "2026.07.05", t: "추이 그래프: 유리 파랑·불리 빨강 단일색 + 세로 그라데이션 적용" },
-  { d: "2026.07.05", t: "추이 그래프 2배 확대 · 저점/고점 상하 꽉채움 · 처음/마지막 값·연월(x축) 표기" },
-  { d: "2026.07.05", t: "추이 그래프 색상을 등락 방향이 아닌 '당사 유불리' 기준으로 변경" },
-  { d: "2026.07.05", t: "소비·원가 6개월 추이 미니차트(CPI·금리·주택·유가·철강·SCFI) 도입" },
-  { d: "2026.07.05", t: "가전 주요뉴스 썸네일·요약 + '오늘의 맥락' 종합 브리핑, 아이디어·등급 라벨 정비" },
-  { d: "2026.07.04", t: "뉴스레터 모음·회차별 열람 페이지 + 업데이트 이력 표시 추가" },
-  { d: "2026.07.04", t: "발송 제목·날짜에 요일 표기, 구독 완료 확인 메일 발송" },
-];
 
 // LG 전략축 카탈로그 — competitor_intelligence strategies.json (lg-a1~a6) 동기화. 뉴스→축 라우팅 키워드.
 const CI_AXES = [
