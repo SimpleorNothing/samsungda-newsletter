@@ -1,6 +1,6 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 최종 업데이트: 2026-07-08 23:53 (KST)
+> 최종 업데이트: 2026-07-09 00:05 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -72,6 +72,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ### 2-7. 글로벌 컨설팅사 인사이트 (C 유형 · 기술/경쟁)
 - **백본 (자동수집)**: McKinsey 네이티브 RSS(`/insights/rss`) — State of the Consumer 등 소비·리테일 인사이트.
 - **부정기 큐레이션**: Deloitte · BCG · Bain · Accenture · PwC · Kearney · Roland Berger · Oliver Wyman — 이메일 뉴스레터 또는 서드파티 RSS 생성기 경유. 상당수 이메일 게이트(등록 필요).
+- **Deloitte Korea 인사이트 허브** (`deloitte.com/kr` · 한국어) ⭐: 인사이트 리포트 목록(`/kr/ko/our-thinking/deloitte-insights.html`) · 월간 **Trend Tracker**(`/kr/ko/our-thinking/Monthly-Trend-Tracker/trend-tracker-YYYY-MM.html` — '이번 달 발간분' 인덱스라 최근 1개월 스캔에 최적) · 주간 **글로벌 경제리뷰**(`/kr/ko/our-thinking/global-economic-review/ger-YYYY-MM-Nst.html` — 매주 금요일) · **Consumer Signals**(분기, 국내 소비심리). 한국어·국내 시사점 포함이라 DA 기획 인용에 직결. DA 우선 픽: Consumer Signals·소비재/유통 전망·관세/통상·에너지(HVAC·전력)·순환경제. 리스트 페이지에 발행일 미표기 → **Trend Tracker(월)·경제리뷰(주차)로 발간 시점 앵커링**.
 - **인용 규율**: 수치·발행일 반드시 확인. **균형 인용** — 컨설팅 낙관 전망엔 상반 데이터·caveat 병기(예: AI 가전 낙관치 ↔ BOK 이슈노트 "AI 생산성 효과 아직 불명확").
 
 ### 2-8. 가전 기술 트렌드 (C 유형 · 기술/제품)
@@ -152,6 +153,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-07-09 00:05 (KST)** — 소스 인벤토리 §2-7에 Deloitte Korea 인사이트 허브(`deloitte.com/kr`, 한국어) 추가. 인사이트 리포트·월간 Trend Tracker·주간 글로벌 경제리뷰·Consumer Signals. 리스트에 발행일 미표기 → Trend Tracker(월)·경제리뷰(주차)로 발간 시점 앵커링.
 - **2026-07-08 23:53 (KST)** — feat: CHANGELOG를 changelog.js로 분리 (자동 적립 마커 포함) (#105) (`13c9cbc`)
 - **2026-07-08 23:16 (KST)** — Merge pull request #97 from SimpleorNothing/codex/cost-signal-icon (`9ff6489`)
 - **2026-07-08 23:15 (KST)** — Merge pull request #104 from SimpleorNothing/fix/remove-lg-axis-badges (`98b78e9`)
