@@ -64,6 +64,7 @@ async function curateInsights(env, candidates) {
         "글로벌 컨설팅사(McKinsey·BCG·Deloitte·Bain·Accenture·PwC·Kearney·Roland Berger·Oliver Wyman)와 한국은행(경제전망·금융안정보고서·BOK 이슈노트·소비자동향조사)의 '최근 약 1개월 내' 발행물 중, DA 기획에 유용한 것 6개를 고른다.",
         "DA 관련 우선순위: 생활가전·스마트홈·AI가전·HVAC/공조·빌트인·구독/렌탈(HaaS)·소비지출·소비심리·내구재수요·프리미엄·D2C·미국주택시장·관세/공급망·원자재·경쟁사(LG전자 등).",
         "제공된 McKinsey RSS 후보를 우선 검토하고, web_search로 한국은행 최근 발표(소비자심리 CCSI·기업경기 BSI·수입물가·이슈노트)와 타 컨설팅 최신분을 보강해 발행일·수치를 확인한다. 발행일이 오래됐거나 불확실하면 제외한다.",
+        "Deloitte는 한국어 허브(deloitte.com/kr)를 우선 탐색한다 — 월간 Trend Tracker(/kr/ko/our-thinking/Monthly-Trend-Tracker/, '이번 달 발간분' 인덱스)·주간 글로벌 경제리뷰(/kr/ko/our-thinking/global-economic-review/, 매주 금요일·발행일 명확)·Consumer Signals(분기, 국내 소비심리)에서 최근 1개월 발행분을 확인하고, 국내 시사점이 담긴 한국어 리포트를 우선한다. domain은 deloitte.com으로 표기.",
         "6개 중 최소 1개는 source를 '균형 관점'으로 두어, 나머지 카드의 낙관적 서술에 대한 반대·신중 근거(예: 'AI 생산성 효과는 아직 불명확')를 담는다.",
         "각 카드는 아래 JSON 스키마. 배열만 반환(코드펜스·설명·인사말 금지):",
         '[{"source":"McKinsey","domain":"mckinsey.com","date":"2026.06","title":"리포트 요지 한 줄","stat":"79%","cap":"수치 설명 한 구","impl":"DA 시사점 한 문장","url":"https://...","image":""}]',
