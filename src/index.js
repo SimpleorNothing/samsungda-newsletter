@@ -16,6 +16,7 @@
 //                     AI 요약 프롬프트에 "검증된 최근 동향"으로 제공 — 위 CI라우팅(미검증 후보)보다 우선 신뢰.
 
 import { SCFI_SEED } from "./scfi-seed.js";
+import { runSendWithReconcile } from "./postsend.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
@@ -402,9 +403,16 @@ async function getSubscribers(env) {
     do {
       const listed = await env.RESEARCH.list({ prefix: SUB_PREFIX, cursor });
       for (const o of (listed.objects || [])) {
-        const obj = await env.RESEARCH.get(o.key);
-        if (!obj) continue;
-        try { const r = await obj.json(); if (r && r.email) out.push(r.email.toLowerCase()); } catch { /* skip */ }
+        // 일시적 R2 read miss로 구독자가 조용히 누락되던 문제 방지 — 최대 3회 재시도.
+        let email = null;
+        for (let attempt = 0; attempt < 3 && !email; attempt++) {
+          try {
+            const obj = await env.RESEARCH.get(o.key);
+            if (obj) { const r = await obj.json(); if (r && r.email) email = r.email.toLowerCase(); }
+          } catch { /* 재시도 */ }
+        }
+        if (email) out.push(email);
+        else console.warn("getSubscribers: 구독자 객체 read 실패(스킵됨) key=" + o.key);
       }
       cursor = listed.truncated ? listed.cursor : null;
     } while (cursor);
@@ -434,21 +442,11 @@ async function run(env, { send }) {
   await persistCiCandidates(env, data);
 
   if (!send) return { ok: true, sent: false };
-  if (!env.RESEND_API_KEY) return { ok: false, error: "RESEND_API_KEY 미설정" };
-  const to = await allRecipients(env);
-  if (!to.length) return { ok: false, error: "수신자 없음" };
-
-  const subject = `📊 기획 데일리 · ${data.date} (${kstWeekday(data.date)})`;
-  let sent = 0, failed = 0; const errs = [];
-  for (const email of to) {
-    const token = await signToken(email, signKey(env));
-    const link = pub ? `${pub}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}` : "#";
-    const html = base.split("__UNSUB__").join(link);
-    const r = await sendResend(env, { to: email, subject, html });
-    if (r.ok) sent++;
-    else { failed++; errs.push(r.error); }
-  }
-  return { ok: failed === 0, sent, failed, errors: errs.slice(0, 3) };
+  // 발송 2-pass(재대조 재발송) + 일일 발송리포트 → postsend.js 위임
+  return runSendWithReconcile(env, {
+    data, base, pub,
+    deps: { allRecipients, signToken, signKey, kstWeekday },
+  });
 }
 
 // ---------- 데이터 수집 ----------
