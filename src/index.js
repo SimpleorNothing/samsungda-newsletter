@@ -86,6 +86,8 @@ const CI_AXES = [
 ];
 const stripCiAxisCodes = v => String(v == null ? "" : v)
   .replace(/\[((?:A[1-6]\s*(?:[\/,·]\s*)?)+)([^\]]*?)\]/g, (_, _codes, rest) => rest.trim())
+  // "A2(HVAC·고효율 가전)" 형태 — 코드만 떼고 괄호 안 설명은 살려 자연스러운 구절로 남김
+  .replace(/\bA[1-6]\(([^)]*)\)/g, (_, inner) => inner)
   .replace(/\bA[1-6]\b(?:\s*[\/,·]\s*\bA[1-6]\b)*/g, "")
   .replace(/\s{2,}/g, " ")
   .replace(/\s+([,.)\]은는이가을를에와과도])/g, "$1")
@@ -1108,7 +1110,7 @@ function ruleSummary(data) {
   if (q["ITB"]) add("홈빌더ETF", pctOf(q["ITB"].price, q["ITB"].first6m));
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 6개월 추이 기준 원가·소비 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
-  const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
+  const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${stripCiAxisCodes(top.headline)}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
   return { hero: `${macro}. ${news}`, sec: sectionInsights(data), newsWhy: {} };
 }
 async function aiSummary(env, data) {
@@ -1378,7 +1380,7 @@ export function renderEmail(data, opts = {}) {
           : "";
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
-        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>
+        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(stripCiAxisCodes(i.headline))}</a>
         ${newsWhyRows(sm.newsWhy[ni], i.summary || "")}
         </td>${thumb}
         </tr></table>`;
