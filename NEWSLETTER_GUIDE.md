@@ -1,6 +1,6 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 최종 업데이트: 2026-07-08 23:15 (KST)
+> 최종 업데이트: 2026-07-08 23:16 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -152,6 +152,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-07-08 23:16 (KST)** — Merge pull request #97 from SimpleorNothing/codex/cost-signal-icon (`9ff6489`)
 - **2026-07-08 23:15 (KST)** — Merge pull request #104 from SimpleorNothing/fix/remove-lg-axis-badges (`98b78e9`)
 - **2026-07-08 23:01 (KST)** — 리서치 인사이트 자동수집(insights.js) index.js 연결 (#103) (`8d1b2fd`)
 - **2026-07-08 22:56 (KST)** — feat: 리서치 인사이트 자동수집 모듈 (McKinsey RSS + Claude 큐레이션 → R2) (#102) (`244c971`)
