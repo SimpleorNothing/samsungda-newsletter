@@ -1,0 +1,59 @@
+name: Sync Changelog
+
+# src가 main에 push될 때, 커밋 메시지의 "[nl] 문구"를 뉴스레터 변경 이력(src/changelog.js)에 자동 적립한다.
+# [nl] 태그가 없는 개발성 커밋(docs/fix 등)은 이력에 남기지 않는다.
+# 봇 자기 커밋은 [skip-changelog]로 재귀를 막고, deploy.yml은 정상 배포되어 이력이 워커에 반영된다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-changelog
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-changelog]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Append [nl] notes to changelog.js
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          FILE=src/changelog.js
+          if [ ! -f "$FILE" ]; then echo "changelog.js 없음, skip"; exit 0; fi
+          export STAMP="$(TZ=Asia/Seoul date '+%Y.%m.%d')"
+          python3 - "$FILE" <<'PY'
+          import os, re, sys
+          raw = os.environ.get("COMMIT_MSG", "")
+          notes = [n.strip() for n in re.findall(r'\[nl\]\s*(.+)', raw) if n.strip()]
+          if not notes:
+              print("no [nl] note"); sys.exit(0)
+          stamp = os.environ["STAMP"]
+          file = sys.argv[1]
+          s = open(file, encoding="utf-8").read()
+          marker = "// ===CHANGELOG_INSERT==="
+          if marker not in s:
+              print("marker missing"); sys.exit(0)
+          esc = lambda t: t.replace("\\", "\\\\").replace('"', '\\"')
+          ins = "".join(f'\n  {{ d: "{stamp}", t: "{esc(n)}" }},' for n in notes)
+          s = s.replace(marker, marker + ins, 1)
+          open(file, "w", encoding="utf-8").write(s)
+          print(f"appended {len(notes)} note(s)")
+          PY
+          if git diff --quiet -- "$FILE"; then
+            echo "변경 없음 — 커밋 생략"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          git commit -m "chore: 뉴스레터 변경 이력 자동 적립 [skip-changelog]"
+          git push
