@@ -1,0 +1,78 @@
+name: Sync Changelog
+
+# 커밋 메시지에서 "[nl] 문구"를 찾아 CHANGELOG.js에 자동으로 항목을 추가한다.
+# [nl] 마크가 없는 커밋은 이력에 남기지 않는다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "wrangler.jsonc"
+      - "package.json"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-changelog
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract and update changelog
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          FILE=src/changelog.js
+          if [ ! -f "$FILE" ]; then echo "changelog not found, skip"; exit 0; fi
+
+          # [nl] 마크 추출
+          NL_MSG=$(echo "$COMMIT_MSG" | grep -oP '\[nl\]\s*\K.*' | head -1)
+          if [ -z "$NL_MSG" ]; then
+            echo "[nl] 마크 없음 — 커밋 생략"; exit 0
+          fi
+
+          SHORT="$(printf '%s' "$COMMIT_SHA" | cut -c1-7)"
+          DATE="$(TZ=Asia/Seoul date '+%Y.%m.%d')"
+          export DATE NL_MSG SHORT
+
+          python3 - "$FILE" <<'PY'
+          import os, re, sys
+          file = sys.argv[1]
+          date = os.environ["DATE"]
+          msg = os.environ["NL_MSG"]
+          short = os.environ["SHORT"]
+
+          s = open(file, encoding="utf-8").read()
+          entry = f'  {{ d: "{date}", t: "{msg}" }},'
+
+          # ===CHANGELOG_INSERT=== 마커 찾아 다음 줄에 삽입
+          if '===CHANGELOG_INSERT===' in s:
+              s = re.sub(
+                  r'(// ===CHANGELOG_INSERT===\n)',
+                  r'\1' + entry + '\n',
+                  s,
+                  count=1
+              )
+          else:
+              print(f"마커를 찾을 수 없음", file=sys.stderr)
+              sys.exit(1)
+
+          open(file, "w", encoding="utf-8").write(s)
+          PY
+
+          if git diff --quiet -- "$FILE"; then
+            echo "변경 없음"; exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          git commit -m "chore: CHANGELOG 자동 갱신 (${SHORT}) [skip ci]"
+          git push

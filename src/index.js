@@ -17,8 +17,8 @@
 
 import { SCFI_SEED } from "./scfi-seed.js";
 import { refreshInsights } from "./insights.js";
-import { runSendWithReconcile } from "./postsend.js";
 import { CHANGELOG } from "./changelog.js";
+import { runSendWithReconcile } from "./postsend.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
@@ -75,6 +75,7 @@ const T = {
   up: "#B02E24", down: "#46647E", deep: "#2F614D", amber: "#A9790F",
 };
 
+
 // LG 전략축 카탈로그 — competitor_intelligence strategies.json (lg-a1~a6) 동기화. 뉴스→축 라우팅 키워드.
 const CI_AXES = [
   { code: "A1", id: "lg-a1", title: "구독/서비스 수익모델 확장", kw: ["구독", "렌탈", "케어", "멤버십", "구독료", "가전구독", "서비스매출", "d2x"] },
@@ -86,8 +87,6 @@ const CI_AXES = [
 ];
 const stripCiAxisCodes = v => String(v == null ? "" : v)
   .replace(/\[((?:A[1-6]\s*(?:[\/,·]\s*)?)+)([^\]]*?)\]/g, (_, _codes, rest) => rest.trim())
-  // "A2(HVAC·고효율 가전)" 형태 — 코드만 떼고 괄호 안 설명은 살려 자연스러운 구절로 남김
-  .replace(/\bA[1-6]\(([^)]*)\)/g, (_, inner) => inner)
   .replace(/\bA[1-6]\b(?:\s*[\/,·]\s*\bA[1-6]\b)*/g, "")
   .replace(/\s{2,}/g, " ")
   .replace(/\s+([,.)\]은는이가을를에와과도])/g, "$1")
@@ -614,6 +613,7 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 
   <footer class="foot" id="updFoot">
     <button type="button" class="upd" id="updBtn" aria-expanded="false" aria-controls="updLog">update : ${updLatest} <span class="cev">&#9662;</span></button>
+    <a href="https://samsungda-newsletter.cw120-park.workers.dev/preview" target="_blank" rel="noopener noreferrer" style="display:block;margin-top:10px;font-size:13px;color:#5C6B79;text-decoration:none">coming soon &rarr;</a>
     <div class="log" id="updLog" role="dialog" aria-label="업데이트 내역">
       <div class="log-h"><span>업데이트 내역</span><button type="button" class="log-x" id="updClose" aria-label="닫기">&times;</button></div>
       <ul>${updRows}</ul>
@@ -1110,7 +1110,7 @@ function ruleSummary(data) {
   if (q["ITB"]) add("홈빌더ETF", pctOf(q["ITB"].price, q["ITB"].first6m));
   const macro = seg.length ? `${seg.slice(0, 3).join(" · ")} — 6개월 추이 기준 원가·소비 점검` : "원가·소비 지표 데이터 수집 지연";
   const nc = (data.news || []).length, top = (data.news || [])[0];
-  const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${stripCiAxisCodes(top.headline)}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
+  const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${top.headline}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
   return { hero: `${macro}. ${news}`, sec: sectionInsights(data), newsWhy: {} };
 }
 async function aiSummary(env, data) {
@@ -1380,7 +1380,7 @@ export function renderEmail(data, opts = {}) {
           : "";
         return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${T.border}"><tr>
         <td valign="top" style="padding:8px 0">
-        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(stripCiAxisCodes(i.headline))}</a>
+        <a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:600;line-height:1.4">${esc(i.headline)}</a>
         ${newsWhyRows(sm.newsWhy[ni], i.summary || "")}
         </td>${thumb}
         </tr></table>`;
@@ -1438,7 +1438,7 @@ export function renderEmail(data, opts = {}) {
 ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;background:${T.text};color:${T.bg};font-size:13px;font-weight:700;letter-spacing:.14em;padding:4px 10px">SAMPLE</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0">
 <tr><td align="center">
-  <table role="presentation" width="756" cellpadding="0" cellspacing="0" style="max-width:756px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
     <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
       <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
       <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">${esc(data.date)} (${kstWeekday(data.date)}) · SAMSUNG DA 기획 도구모음</div>
@@ -1460,10 +1460,10 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
   </table>
-  <div style="max-width:756px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
+  <div style="max-width:600px;margin:10px auto 0;font-size:13px;color:${T.muted};text-align:center;line-height:1.6">
     지표 출처: Yahoo Finance(환율·유가·구리·금리·홈빌더ETF), FRED(美·유럽·한국 CPI·철강·수지·기존주택·소비심리), SCFI(Shanghai Containerized Freight Index·상하이발 운임, web_search 일 1회 캐시). 그래프는 6개월 추이(월간지표는 발표치 기준), 추가 지표는 물가 전년·원자재/환율 스냅샷·소비심리 전월. SCFI 추이는 엑셀 seed + 누적 관측치 기준.
   </div>
-  <div style="max-width:756px;margin:14px auto 0;text-align:left">
+  <div style="max-width:600px;margin:14px auto 0;text-align:left">
     <span id="nlUpdWrap" style="position:relative;display:inline-block">
       <span id="nlUpdBtn" style="font-size:13px;color:${T.muted};cursor:pointer;user-select:none;font-variant-numeric:tabular-nums">update : ${CHANGELOG.length ? CHANGELOG[0].d : ""} &#9662;</span>
       <span id="nlUpdLog" style="display:none;position:absolute;left:0;bottom:calc(100% + 8px);width:340px;max-width:80vw;max-height:52vh;overflow:auto;background:${T.surface};border:1px solid ${T.border};box-shadow:0 12px 28px rgba(23,34,45,.16);padding:14px 14px 8px;z-index:50;text-align:left">
