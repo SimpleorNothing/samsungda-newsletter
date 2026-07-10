@@ -873,16 +873,25 @@ function isOwnCompanyNews(n) {
   const comps = n.competitors || [];
   return comps.length === 1 && comps[0] === "삼성전자";
 }
-// 표시용 뉴스 선별: grade·impact 정렬된 풀에서 최대 limit건, 그중 당사(삼성) 단독기사는 최대 ownCap건만 채택.
+// LG전자 기사 판별 — competitors에 LG전자 포함(CI 라우팅과 동일 기준).
+function isLgNews(n) {
+  return (n.competitors || []).includes("LG전자");
+}
+// 표시용 뉴스 선별: grade·impact 정렬된 풀에서 최대 limit건.
+//  - 당사(삼성) 단독기사는 최대 ownCap건만 채택.
+//  - LG전자 기사는 최대 lgCap건만 채택(초과분은 건너뛰고 비-LG 기사로 자동 충당).
 // 나머지 자리는 경쟁사·소비자·기술 등 비당사 기사로 자동 충당(정렬 순서 유지).
-function selectNews(pool, limit = 5, ownCap = 1) {
+function selectNews(pool, limit = 5, ownCap = 1, lgCap = 3) {
   const out = [];
-  let ownCount = 0;
+  let ownCount = 0, lgCount = 0;
   for (const n of pool) {
     if (out.length >= limit) break;
     if (isOwnCompanyNews(n)) {
       if (ownCount >= ownCap) continue;
       ownCount++;
+    } else if (isLgNews(n)) {
+      if (lgCount >= lgCap) continue;
+      lgCount++;
     }
     out.push(n);
   }
