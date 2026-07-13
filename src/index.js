@@ -967,7 +967,8 @@ async function getReports(env) {
   try {
     const listed = await env.RESEARCH.list({ include: ["customMetadata", "httpMetadata"] });
     return (listed.objects || [])
-      .filter(o => !o.key.startsWith(BANK_PREFIX) && !o.key.startsWith(NL_PREFIX) && !o.key.startsWith(SUB_PREFIX) && !o.key.startsWith("signals/"))
+      // 보고서는 prefix 없는 최상위 키. 타 도구 소유 prefix(idea-bank/·newsletter/·subscribers/·signals/·usage/)는 전부 제외
+      .filter(o => !o.key.includes("/"))
       .map(o => ({ title: o.customMetadata?.title ? safeDecode(o.customMetadata.title) : o.key, uploaded: o.uploaded, key: o.key }))
       .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
       .slice(0, 30);
@@ -1424,11 +1425,10 @@ export function renderEmail(data, opts = {}) {
   // New 아이디어/보고서 — 아이디어 뱅크 + 보고서 통합, 발송일 기준 지난 1주 내 신규 생성분만.
   // 파일명 _YYMMDDHHMM…(연월일+시분+메타) → _연월일(YYMMDD)까지만 노출.
   const reportTitle = t => t.replace(/(_\d{6})\d{4}(?:_.*)?$/, "$1");
-  const freshCutoff = Date.now() - 7 * 24 * 3600 * 1000;
   const newItems = [
     ...data.ideas.map(i => ({ kind: "아이디어", title: i.title || "", url: i.id ? IDEA_URL + "/#" + encodeURIComponent(i.id) : IDEA_URL + "/", ts: i.createdAt || 0 })),
     ...data.reports.map(r => ({ kind: "보고서", title: reportTitle(r.title || ""), url: r.key ? "https://samsungda.net/research/" + encodeURIComponent(r.key) : "", ts: r.uploaded ? new Date(r.uploaded).getTime() : 0 })),
-  ].filter(x => x.title && x.ts >= freshCutoff).sort((a, b) => b.ts - a.ts).slice(0, 3);
+  ].filter(x => x.title).sort((a, b) => b.ts - a.ts).slice(0, 3);
   // 종류 표시를 네모박스 라벨 → 무채색 회색 라인 아이콘으로 변경(아이디어=전구, 보고서=문서).
   const newIcon = kind => {
     const s = `stroke="${T.muted}" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
@@ -1440,7 +1440,11 @@ export function renderEmail(data, opts = {}) {
   const newRows = newItems.length
     ? newItems.map(x => `<div style="padding:7px 0;border-bottom:1px solid ${T.border}">
         <a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer" style="color:${T.text};text-decoration:none;font-size:14px;font-weight:400;line-height:1.5">${newIcon(x.kind)}${esc(x.title)}</a></div>`).join("")
-    : `<div style="font-size:13px;color:${T.muted}">지난 1주 신규 아이디어·보고서 없음</div>`;
+    : `<div style="font-size:13px;color:${T.muted}">등록된 아이디어·보고서 없음</div>`;
+  const insightsIcon = (() => {
+    const s = `stroke="${T.muted}" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+    return `<span style="display:inline-block;width:15px;height:15px;margin-right:6px;vertical-align:-2px;line-height:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" role="img" aria-label="기획 인사이트"><path d="M4 4.5h5a2.5 2.5 0 0 1 2.5 2.5v12A2 2 0 0 0 9.5 17H4Z" ${s}/><path d="M20 4.5h-5A2.5 2.5 0 0 0 12.5 7v12a2 2 0 0 1 2-2H20Z" ${s}/><path d="M12 7v12" ${s}/></svg></span>`;
+  })();
 
   const costSignalIcon = `<span style="display:inline-block;width:15px;height:15px;margin-right:6px;vertical-align:-2px;line-height:0"><svg width="15" height="15" viewBox="0 0 32 32" fill="none" role="img" aria-label="원가"><circle cx="16" cy="16" r="14" stroke="${T.brand}" stroke-width="2"/><circle cx="16" cy="16" r="11" stroke="${T.brand}" stroke-width="1.6"/><path d="M16 6.5v19" stroke="${T.brand}" stroke-width="2" stroke-linecap="round"/><path d="M21.2 10.8c-1.2-1.3-3-2-5.1-2-2.8 0-5 1.5-5 3.8 0 2.2 1.9 3 5.3 3.8 3.1.8 4.6 1.5 4.6 3.6 0 2.4-2.2 4-5.3 4-2.3 0-4.3-.8-5.8-2.3" stroke="${T.brand}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
   const section = (title, body, extra, first, ins) => `<tr><td style="padding:${first ? "16" : "20"}px 22px 0;${first ? "" : `border-top:1px solid ${T.border}`}">
@@ -1490,7 +1494,7 @@ ${opts.sample ? `<div style="position:fixed;top:12px;left:12px;z-index:100;backg
     ${section(`${costSignalIcon}원가 시그널`, costTrend + cost, "", false, sm.sec.cost)}
     ${section("📰 시장 동향", newsRows, "", false, sm.sec.news)}
     ${insightsSection}
-    ${section("🆕 기획 인사이트", newRows)}
+    ${section(`${insightsIcon}기획 인사이트`, newRows)}
     <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
       <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="__UNSUB__" target="_blank" rel="noopener noreferrer" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
     </td></tr>
