@@ -1124,6 +1124,29 @@ function ruleSummary(data) {
   const news = nc ? `가전뉴스 ${nc}건${top ? ` — 「${stripCiAxisCodes(top.headline)}」` : ""}` : "최근 24시간 신규 가전뉴스 없음";
   return { hero: `${macro}. ${news}`, sec: sectionInsights(data), newsWhy: {} };
 }
+// 요약 멘트 안전 절단: 글자수 한도에서 문장·괄호가 중간에 끊기지 않게 정리.
+// 1) 한도 이내면 원문 그대로. 2) 초과 시 구분자(·/,/공백) 경계까지 되돌려 자름.
+// 3) 닫히지 않은 괄호는 잘린 꼬리 토큰을 버리고 닫거나 통째로 제거 → "(美CPI 6M +1.3%p, 10Y" 같은 미완 꼬리 방지.
+function clampPhrase(v, max) {
+  let s = String(v == null ? "" : v).trim();
+  if (!s) return "";
+  if (s.length > max) {
+    let cut = s.slice(0, max);
+    const b = Math.max(cut.lastIndexOf("\u00b7"), cut.lastIndexOf(","), cut.lastIndexOf(" "));
+    if (b > max * 0.5) cut = cut.slice(0, b);
+    s = cut.trim();
+  }
+  const op = (s.match(/\(/g) || []).length, cl = (s.match(/\)/g) || []).length;
+  if (op > cl) {
+    const i = s.lastIndexOf("(");
+    let inner = s.slice(i + 1).trim();
+    const b2 = Math.max(inner.lastIndexOf("\u00b7"), inner.lastIndexOf(","));
+    if (b2 > 0) inner = inner.slice(0, b2);
+    inner = inner.replace(/[\u00b7,\s]+$/, "").trim();
+    s = inner ? `${s.slice(0, i).trim()} (${inner})` : s.slice(0, i).trim();
+  }
+  return s.replace(/[\u00b7,\s]+$/, "").trim();
+}
 async function aiSummary(env, data) {
   if (env && env.ANTHROPIC_API_KEY) {
     try {
@@ -1162,6 +1185,7 @@ async function aiSummary(env, data) {
             "  · 원/달러 하락(원화 강세) = 달러 결제 원자재·부품의 원화 환산 구매원가 하락 요인.",
             "  · 생산거점 통화(페소=멕시코, 바트=태국, 동=베트남, 루피=인도, 즈워티=폴란드) 강세 = 현지 인건비·조달비의 달러 환산 상승 → 원가 '상승' 요인. 이 방향을 절대 뒤집지 말 것.",
             "  · 원화 강세와 생산거점 통화 강세는 원가에 반대 방향으로 작용 — 함께 움직일 때 '전방위 원가 하락'으로 뭉뚱그리지 말고 구분해 서술.",
+            "- 文장 완결 원칙: hero·consume·cost·newsSummary는 반드시 완결된 문장으로 끝맺는다. 괄호를 열었으면 반드시 닫고, 근거 지표를 나열하다 중간에서 끊지 않는다. 글자수 한도 때문에 문장이 잘릴 것 같으면 병기하는 근거 지표 개수를 줄여 한도 안에서 끝맺는다.",
             "- 추론 규율: 제공된 데이터만 근거로 하고 추측·과장 금지. 데이터가 부족한 항목은 빈 문자열. 단, 뉴스의 content·opportunity·threat는 예외로 세 문장을 모두 채우되 근거가 약하면 영향 제한으로 서술한다.",
             "  · 지표에 직접 없는 수요·판매·점유율은 단정하지 말 것. 거시지표에서 유추한 판단은 근거 지표를 반드시 괄호 병기.",
             "  · '지속'·'추세'·'회복' 같은 시계열 표현은 6개월 델타(시장지표) 또는 전년/전월/전주 델타(물가·심리·주간·운임)로 뒷받침될 때 사용한다. 하루치 스냅샷 하나로 추세를 단정하지 않는다.",
@@ -1179,20 +1203,20 @@ async function aiSummary(env, data) {
         const mm = cleaned.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(mm ? mm[0] : cleaned);
         const rs = sectionInsights(data);
-        const str = (v, n) => typeof v === "string" ? stripCiAxisCodes(v).slice(0, n) : "";
+        const str = (v, n) => typeof v === "string" ? clampPhrase(stripCiAxisCodes(v), n) : "";
         const newsWhy = {};
         for (const it of (Array.isArray(parsed.news) ? parsed.news : [])) {
           if (!it || !Number.isInteger(it.idx)) continue;
-          const content = typeof it.content === "string" ? stripCiAxisCodes(it.content).slice(0, 110) : "";
-          const opportunity = typeof it.opportunity === "string" ? stripCiAxisCodes(it.opportunity).slice(0, 110) : "";
-          const threat = typeof it.threat === "string" ? stripCiAxisCodes(it.threat).slice(0, 110) : "";
-          const legacy = typeof it.why === "string" ? stripCiAxisCodes(it.why).slice(0, 110) : "";
+          const content = typeof it.content === "string" ? clampPhrase(stripCiAxisCodes(it.content), 140) : "";
+          const opportunity = typeof it.opportunity === "string" ? clampPhrase(stripCiAxisCodes(it.opportunity), 140) : "";
+          const threat = typeof it.threat === "string" ? clampPhrase(stripCiAxisCodes(it.threat), 140) : "";
+          const legacy = typeof it.why === "string" ? clampPhrase(stripCiAxisCodes(it.why), 140) : "";
           if (content || opportunity || threat || legacy) newsWhy[it.idx] = { content: content || legacy, opportunity, threat };
         }
-        const hero = str(parsed.hero, 180);
+        const hero = str(parsed.hero, 220);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 120) || rs.consume, cost: str(parsed.cost, 120) || rs.cost, news: str(parsed.newsSummary, 120) || rs.news },
+          sec: { consume: str(parsed.consume, 200) || rs.consume, cost: str(parsed.cost, 200) || rs.cost, news: str(parsed.newsSummary, 180) || rs.news },
           newsWhy,
         };
       } else {
