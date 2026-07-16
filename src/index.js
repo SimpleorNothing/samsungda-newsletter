@@ -58,7 +58,7 @@ const CORS = {
 
 // FRED 시리즈
 const FRED = {
-  cpiUS: "CPIAUCSL", pce: "PCEPI", cpiKR: "KORCPIALLMINMEI", cpiEU: "CP0000EZ19M086NEST",
+  cpiUS: "CPIAUCNS", pce: "PCEPI", cpiKR: "KORCPIALLMINMEI", cpiEU: "CP0000EZ19M086NEST",
   houst: "HOUST", exhome: "EXHOSLUSM495S", umich: "UMCSENT", ironore: "PIORECRUSDM",
   steel: "WPU101", resin: "PCU325211325211",
 };
