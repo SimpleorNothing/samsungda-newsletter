@@ -767,10 +767,17 @@ function seriesTrend(vals, dates) {
   };
 }
 // FRED rows → 추이셀. yoy=true면 전년비(%) 시계열로 변환(레벨이 단조증가하는 CPI용).
+// 전년비는 배열 위치(i-12)가 아니라 날짜 기준 12개월 전 관측치와 비교한다 — 결측월(예: 2025-10 미발표)로 인한 위치 오정렬 방지.
 function fredTrend(rows, yoy) {
   if (!rows || rows.length < 4) return null;
   let vals, dates;
-  if (yoy) { vals = []; dates = []; for (let i = 12; i < rows.length; i++) { vals.push((rows[i].v / rows[i - 12].v - 1) * 100); dates.push(rows[i].d); } }
+  if (yoy) {
+    const byYM = new Map();
+    for (const r of rows) byYM.set(String(r.d).slice(0, 7), r.v);
+    const ymBack12 = d => { let [y, m] = String(d).slice(0, 7).split("-").map(Number); m -= 12; while (m <= 0) { m += 12; y -= 1; } return `${y}-${String(m).padStart(2, "0")}`; };
+    vals = []; dates = [];
+    for (const r of rows) { const b = byYM.get(ymBack12(r.d)); if (b != null && b) { vals.push((r.v / b - 1) * 100); dates.push(r.d); } }
+  }
   else { vals = rows.map(r => r.v); dates = rows.map(r => r.d); }
   return seriesTrend(vals, dates);
 }
