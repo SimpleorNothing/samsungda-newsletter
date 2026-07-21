@@ -1617,4 +1617,58 @@ function welcomeEmail(pub, unsub) {
 <meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"></head>
 <body style="margin:0;padding:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};padding:24px 0"><tr><td align="center">
-  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hid
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};overflow:hidden">
+    <tr><td style="padding:24px 22px 16px;border-bottom:2px solid ${T.text};text-align:center">
+      <div style="font-size:20px;font-weight:800;color:${T.text};letter-spacing:-.01em">기획 데일리</div>
+      <div style="margin-top:4px;font-size:13px;color:${T.muted};letter-spacing:.04em">SAMSUNG DA 기획 도구모음</div>
+    </td></tr>
+    <tr><td style="padding:28px 22px 24px">
+      <div style="font-size:16px;font-weight:700;color:${T.text};line-height:1.6">구독 신청이 완료되었습니다.</div>
+      <div style="margin-top:12px;font-size:14px;color:${T.muted};line-height:1.75">이제 매일 아침(월~금) 지표와 뉴스에 의미를 더한 <b style="color:${T.text}">기획 데일리</b> 브리핑을 이 메일 주소로 받아보실 수 있습니다. 다음 발행 호부터 도착합니다.</div>
+      <div style="margin-top:20px"><a href="${latest}" style="display:inline-block;padding:10px 18px;background:${T.brand};color:#fff;font-size:14px;font-weight:700;text-decoration:none">최근 호 보기 →</a></div>
+    </td></tr>
+    <tr><td style="padding:22px;border-top:1px solid ${T.border};text-align:center">
+      <div style="font-size:13px;color:${T.muted};line-height:1.7">samsungda.net · 기획 도구모음 자동 발송<br><a href="${unsub}" style="color:${T.muted};text-decoration:underline">수신거부</a></div>
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>`;
+}
+
+function unsubPage(mode, email, token) {
+  const safe = (email || "").replace(/[&<>"]/g, "");
+  let msg;
+  if (mode === "done") {
+    msg = `<b>${safe}</b> 님의 뉴스레터 수신이 해지되었습니다.`;
+  } else if (mode === "confirm") {
+    msg = `<b>${safe}</b> 님, 기획 데일리 수신을 중단하시겠습니까?
+  <form method="POST" action="/unsubscribe" style="margin:20px 0 0">
+    <input type="hidden" name="e" value="${safe}">
+    <input type="hidden" name="t" value="${String(token || "").replace(/[&<>"]/g, "")}">
+    <button type="submit" style="background:${T.text};color:#fff;border:0;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">수신거부 확정</button>
+  </form>`;
+  } else {
+    msg = `유효하지 않은 링크입니다. 이미 해지되었거나 링크가 만료되었을 수 있습니다.`;
+  }
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"><title>수신거부</title></head>
+<body style="margin:0;background:${T.bg};font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif;color:${T.text}">
+<div style="max-width:420px;margin:80px auto;padding:32px 28px;background:${T.surface};border:1px solid ${T.border};border-top:3px solid ${T.text};text-align:center">
+  <div style="font-size:17px;font-weight:800;margin-bottom:10px">기획 데일리</div>
+  <div style="font-size:14px;color:${T.muted};line-height:1.7">${msg}</div>
+  <a href="https://samsungda.net" style="display:inline-block;margin-top:20px;color:${T.brand};font-size:13px;font-weight:600;text-decoration:none">도구모음으로 →</a>
+</div></body></html>`;
+}
+
+function kstDate(ts = Date.now()) {
+  const k = new Date(ts + 9 * 3600 * 1000);
+  const p = n => String(n).padStart(2, "0");
+  return `${k.getUTCFullYear()}.${p(k.getUTCMonth() + 1)}.${p(k.getUTCDate())}`;
+}
+// YYYY.MM.DD → 한글 요일(월~일). 발송 제목·아카이브 날짜 옆 표기용.
+const WEEKDAYS_KO = ["일", "월", "화", "수", "목", "금", "토"];
+function kstWeekday(dateStr) {
+  const m = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(dateStr || "");
+  if (!m) return "";
+  return WEEKDAYS_KO[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()];
+}
