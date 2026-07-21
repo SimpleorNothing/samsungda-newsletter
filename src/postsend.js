@@ -3,7 +3,7 @@
 //  (1) 수신자 목록 대비 실제 발송을 대조해 "어떤 이유로든" 발송 안 된 주소를 재발송(2-pass).
 //  (2) 발송결과 요약 리포트를 매일 아침 관리자(REPORT_TOS)에게 메일 — 수신처 전체 리스트 + 전체/성공/실패.
 //  (3) 동일 날짜·수신자 중복 발송은 Idempotency-Key로 방지(수동 /send 재실행 안전).
-//  (4) [배달점검] Resend 이벤트 조회로 "접수"가 아닌 실제 배달(delivered/bounced/delayed) 상태를 확인해 리포트에 표기.
+//  (4) [배달점검] Resend 이벤트 조회로 "접수"가 아닌 실제 배달 상태를 확인 — VERIFY_DELIVERY=true 일 때만 동작(기본 꺼짐).
 //  (5) [백업] 리포트 JSON/HTML을 R2에 항상 보관 — 리포트 메일이 유실돼도 나중에 복구·조회 가능.
 //  (6) [리포트 재시도] 리포트 메일 발송 실패 시 백오프 재시도, 최종 실패도 R2에 기록.
 //  (7) [예외격리] 수신자 1명의 예외가 발송 루프 전체를 끊지 못하게 격리하고, 어떤 경우에도 리포트는 발송.
@@ -61,6 +61,7 @@ export async function sendResendIdem(env, { to, subject, html, idem }) {
 // Resend가 200을 준 것은 "접수"일 뿐 배달 성공이 아니다. 회사 메일 게이트웨이가
 // 보류·격리하는 경우 접수는 성공인데 수신함엔 안 들어온다. 발송 후 잠시 대기했다가
 // GET /emails/{id} 로 last_event를 확인해 실제 상태를 리포트에 남긴다.
+// 단, 서브리퀘스트를 소모하므로 상시 실행하지 않는다(VERIFY_DELIVERY 게이트).
 // ─────────────────────────────────────────────────────────────
 const DELIVERY_LABEL = {
   delivered: "배달완료", bounced: "반송", complained: "스팸신고",
@@ -153,6 +154,7 @@ export async function checkSendHealth(env, { date, kstWeekday }) {
 
   let report = null;
   try { report = JSON.parse(await stored.text()); } catch { report = null; }
+  // 배달점검을 안 돌린 날은 undelivered가 비어 있으므로 자연히 경보 없음(오탐 방지).
   const pending = (report && report.undelivered) || [];
   if (pending.length) {
     const html = `<!DOCTYPE html><html lang="ko"><body style="font-family:-apple-system,'Malgun Gothic',sans-serif;color:#222;max-width:560px;margin:0 auto;padding:16px">`
@@ -183,25 +185,26 @@ async function sendDailyReport(env, report, kstWeekday) {
   const dvText = (ev) => (ev ? (DELIVERY_LABEL[ev] || ev) : "확인불가");
 
   const recs = (report.recipients || []).slice().sort((a, b) => (a.ok === b.ok ? a.email.localeCompare(b.email) : (a.ok ? 1 : -1)));
+  const checked = report.deliveryChecked === true;   // 배달점검을 실제로 돌렸을 때만 배달 열 표기
   const recRows = recs.map((r, i) => `<tr>`
     + `<td style="padding:5px 8px;border-top:1px solid #eee;color:#888;font-variant-numeric:tabular-nums">${i + 1}</td>`
     + `<td style="padding:5px 8px;border-top:1px solid #eee;font-family:monospace">${r.email}</td>`
-    + `<td style="padding:5px 8px;border-top:1px solid #eee;font-weight:700;color:${r.ok ? '#0a0' : '#b00'}">${r.ok ? '접수' : '실패'}</td>`
-    + `<td style="padding:5px 8px;border-top:1px solid #eee;font-weight:700;color:${dvColor(dv[r.email])}">${dvText(dv[r.email])}</td>`
+    + `<td style="padding:5px 8px;border-top:1px solid #eee;font-weight:700;color:${r.ok ? '#0a0' : '#b00'}">${r.ok ? (checked ? '접수' : '성공') : '실패'}</td>`
+    + (checked ? `<td style="padding:5px 8px;border-top:1px solid #eee;font-weight:700;color:${dvColor(dv[r.email])}">${dvText(dv[r.email])}</td>` : "")
     + `</tr>`).join("");
   const recTable = recRows
     ? `<p style="margin:16px 0 4px;color:#666;font-weight:600">수신처 전체 (${total}명)</p>`
       + `<table style="border-collapse:collapse;font-size:13px;width:100%">`
-      + `<tr><th style="text-align:left;padding:5px 8px;color:#888">#</th><th style="text-align:left;padding:5px 8px;color:#888">주소</th><th style="text-align:left;padding:5px 8px;color:#888">API</th><th style="text-align:left;padding:5px 8px;color:#888">배달</th></tr>`
+      + `<tr><th style="text-align:left;padding:5px 8px;color:#888">#</th><th style="text-align:left;padding:5px 8px;color:#888">주소</th><th style="text-align:left;padding:5px 8px;color:#888">${checked ? 'API' : '상태'}</th>${checked ? '<th style="text-align:left;padding:5px 8px;color:#888">배달</th>' : ''}</tr>`
       + `${recRows}</table>`
-      + `<p style="margin:6px 0 0;color:#999;font-size:12px">※ 'API 접수'는 Resend 접수 성공, '배달'은 수신 서버 도달 여부. 접수 성공이어도 배달이 '지연/반송'이면 실제로는 도착하지 않은 것.</p>`
+      + (checked ? `<p style="margin:6px 0 0;color:#999;font-size:12px">※ 'API 접수'는 Resend 접수 성공, '배달'은 수신 서버 도달 여부. 접수 성공이어도 배달이 '지연/반송'이면 실제로는 도착하지 않은 것.</p>` : `<p style="margin:6px 0 0;color:#999;font-size:12px">※ 배달 확인(Resend 이벤트 조회)은 꺼져 있음. 켜려면 Worker 환경변수 VERIFY_DELIVERY=true.</p>`)
     : "";
 
   // 배달 미확정·실패 경고 배너 — 접수는 됐는데 배달이 안 된 케이스를 한눈에
   const abortBanner = report.aborted
     ? `<div style="margin:10px 0;padding:10px 12px;background:#ffecec;border-left:3px solid #b00;font-size:13px"><b>발송 중단 감지</b> — ${String(report.aborted)}</div>`
     : "";
-  const undelivered = recs.filter(r => r.ok && dv[r.email] !== "delivered");
+  const undelivered = checked ? recs.filter(r => r.ok && dv[r.email] !== "delivered") : [];
   const banner = undelivered.length
     ? `<div style="margin:10px 0;padding:10px 12px;background:#fff6e5;border-left:3px solid #e59a00;font-size:13px">`
       + `<b>배달 미확인 ${undelivered.length}건</b> — ${undelivered.map(r => `${r.email}(${dvText(dv[r.email])})`).join(", ")}`
@@ -225,7 +228,9 @@ async function sendDailyReport(env, report, kstWeekday) {
     + `<p style="margin:18px 0 0;color:#999;font-size:12px">samsungda-newsletter · 자동 생성</p></body></html>`;
 
   const delivered = recs.filter(r => dv[r.email] === "delivered").length;
-  const subject = `기획 데일리 발송 리포트 · ${report.date} (${dow}) — 전체 ${total}·접수 ${success}·배달 ${delivered}·실패 ${fail}`;
+  const subject = checked
+    ? `기획 데일리 발송 리포트 · ${report.date} (${dow}) — 전체 ${total}·접수 ${success}·배달 ${delivered}·실패 ${fail}`
+    : `기획 데일리 발송 리포트 · ${report.date} (${dow}) — 전체 ${total}·성공 ${success}·실패 ${fail}`;
 
   // [백업] 메일 발송 전에 먼저 R2에 저장 — 메일이 유실돼도 기록은 남는다.
   await persistReport(env, report, html);
@@ -282,6 +287,7 @@ export async function runSendWithReconcile(env, { data, base, pub, deps }) {
   let allTargets = [...to];
   let missedAfterFirst = [];
   let delivery = {};
+  let deliveryChecked = false;               // 배달점검 실행 여부(리포트 표기 분기용)
   let aborted = null;                        // 예상 못한 중단 사유(리포트에 기록)
 
   try {
@@ -304,9 +310,16 @@ export async function runSendWithReconcile(env, { data, base, pub, deps }) {
     }
     allTargets = [...new Set([...to, ...intended])];
 
-    // [배달점검] 접수 성공분의 실제 배달 상태를 Resend 이벤트로 확인(최대 약 40초 대기).
-    try { delivery = await verifyDelivery(env, idMap); }
-    catch (e) { delivery = {}; console.warn(`[배달점검 실패] ${String((e && e.message) || e)}`); }
+    // [배달점검] 기본 꺼짐 — env.VERIFY_DELIVERY === "true" 일 때만 동작.
+    // 이유: Cloudflare 무료 플랜은 한 실행당 서브리퀘스트 50회 상한이 있고,
+    // 뉴스레터 실행은 이미 지표·뉴스·AI 호출로 한도에 근접한다. 배달점검은
+    // 수신자당 최대 2회 조회를 추가로 소모하므로 상시 켜두면 발송 자체가 끊길 위험이 있다.
+    // 게이트웨이 이슈 추적이 필요한 날만 VERIFY_DELIVERY=true 로 켠다.
+    if (env.VERIFY_DELIVERY === "true") {
+      deliveryChecked = true;
+      try { delivery = await verifyDelivery(env, idMap); }
+      catch (e) { delivery = {}; console.warn(`[배달점검 실패] ${String((e && e.message) || e)}`); }
+    }
   } catch (e) {
     // 예상 못한 중단 — 그래도 아래 리포트는 반드시 나간다.
     aborted = String((e && e.message) || e);
@@ -314,18 +327,21 @@ export async function runSendWithReconcile(env, { data, base, pub, deps }) {
   }
 
   const stillMissing = allTargets.filter(e => !okSet.has(e));
-  const undelivered = allTargets.filter(e => okSet.has(e) && delivery[e] !== "delivered");
+  const undelivered = deliveryChecked
+    ? allTargets.filter(e => okSet.has(e) && delivery[e] !== "delivered")
+    : [];   // 점검을 안 했으면 '미확인'으로 단정하지 않는다
 
   const report = {
     date: data.date,
     generatedAt: new Date().toISOString(),
     intended: allTargets.length,
     sent: okSet.size,
-    delivered: allTargets.filter(e => delivery[e] === "delivered").length,
+    delivered: deliveryChecked ? allTargets.filter(e => delivery[e] === "delivered").length : null,
     recovered: missedAfterFirst.filter(e => okSet.has(e)).length,
     stillMissing,
     undelivered,
     aborted,
+    deliveryChecked,
     delivery,
     messageIds: idMap,
     recipients: allTargets.map(e => ({ email: e, ok: okSet.has(e) })),
