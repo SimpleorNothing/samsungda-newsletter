@@ -7,7 +7,8 @@
 //  (5) [백업] 리포트 JSON/HTML을 R2에 항상 보관 — 리포트 메일이 유실돼도 나중에 복구·조회 가능.
 //  (6) [리포트 재시도] 리포트 메일 발송 실패 시 백오프 재시도, 최종 실패도 R2에 기록.
 //  (7) [예외격리] 수신자 1명의 예외가 발송 루프 전체를 끊지 못하게 격리하고, 어떤 경우에도 리포트는 발송.
-//  (8) [미발송 감지] checkSendHealth로 리포트 부재(=발송 중단)를 사후 감지해 경보.
+//  (8) [미발송 감지·자동복구] checkSendHealth가 리포트 부재(=발송 중단)를 감지하면 스스로 재발송을 시도하고,
+//      그래도 실패할 때만 경보 메일을 보낸다.
 // deps 로 index.js 의 { allRecipients, signToken, signKey, kstWeekday } 를 주입받아 순환참조를 피한다.
 
 const REPORT_TOS = ["cw120.park@samsung.com", "cw120.park@gmail.com"];  // 발송결과 일일 리포트 수신 주소
@@ -129,27 +130,53 @@ export async function getStoredReport(env, date) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// [미발송 감지] 발송 몇 시간 뒤 실행하는 헬스체크.
+// [미발송 감지 + 자동복구] 발송 몇 시간 뒤 실행하는 헬스체크.
 // 오늘자 리포트가 R2에 없다 = 발송 실행이 리포트 단계에 도달조차 못했다(중단·크래시).
-// 그 사실 자체를 경보 메일로 알린다. 리포트가 있으면 배달 미확인 건만 재점검해 알린다.
+// 이때 사람을 기다리지 않고 recover()로 즉시 재발송을 시도하고, 그래도 안 되면 경보한다.
+// 리포트가 있으면 배달 미확인 건만 재점검해 알린다.
 // ─────────────────────────────────────────────────────────────
-export async function checkSendHealth(env, { date, kstWeekday }) {
+export async function checkSendHealth(env, { date, kstWeekday, recover }) {
   const dow = kstWeekday ? kstWeekday(date) : "";
-  let stored = null;
-  if (env.RESEARCH) { try { stored = await env.RESEARCH.get(`reports/${date}.json`); } catch { stored = null; } }
+  const readReport = async () => {
+    if (!env.RESEARCH) return null;
+    try { return await env.RESEARCH.get(`reports/${date}.json`); } catch { return null; }
+  };
+  let stored = await readReport();
+
+  // [자동복구] 리포트가 없다 = 발송이 안 됐다. 사람 개입을 기다리지 않고 즉시 재발송을 시도한다.
+  // recover는 index.js가 주입하는 sendStored — 제작본이 있으면 발송만, 없으면 제작까지 수행한다.
+  // 발송은 수신자별 멱등키를 쓰므로 이미 받은 사람에게 중복 발송되지 않는다(재시도가 항상 안전).
+  let recovery = null;
+  if (!stored && typeof recover === "function") {
+    console.warn(`[헬스체크] ${date} 리포트 없음 — 자동 복구 발송 시도`);
+    try {
+      const r = await recover();
+      recovery = { attempted: true, ok: !!(r && r.ok), detail: (r && r.error) || null };
+    } catch (e) {
+      recovery = { attempted: true, ok: false, detail: String((e && e.message) || e) };
+    }
+    stored = await readReport();   // 복구 성공 시 리포트가 생성됐을 것
+    if (stored) {
+      console.warn(`[헬스체크] ${date} 자동 복구 발송 완료`);
+      return { ok: true, date, reason: "자동 복구 발송 완료", recovery, alerted: false };
+    }
+  }
 
   if (!stored) {
     const html = `<!DOCTYPE html><html lang="ko"><body style="font-family:-apple-system,'Malgun Gothic',sans-serif;color:#222;max-width:560px;margin:0 auto;padding:16px">`
       + `<h2 style="margin:0 0 8px;font-size:18px;color:#b00">⚠️ 발송 리포트 없음 — 발송 실패 의심</h2>`
       + `<p style="margin:0 0 12px;color:#666">${date} (${dow})</p>`
       + `<p style="font-size:14px;line-height:1.6">오늘자 발송 리포트가 R2에 기록되지 않았다. 06:30 발송 실행이 <b>리포트 단계에 도달하지 못하고 중단</b>됐을 가능성이 높다(일부만 발송되거나 전혀 발송되지 않았을 수 있음).</p>`
-      + `<p style="font-size:14px;line-height:1.6">확인 순서 — ① Resend 대시보드에서 오늘 06:30 발송 건수 ② Cloudflare Worker 로그의 예외 ③ 필요 시 <code>/send</code> 수동 재발송.</p>`
+      + (recovery
+          ? `<p style="font-size:14px;line-height:1.6;padding:10px 12px;background:#fff6e5;border-left:3px solid #e59a00"><b>자동 복구 발송도 실패했다.</b>${recovery.detail ? ` 사유: ${String(recovery.detail)}` : ""} 수동 조치가 필요하다.</p>`
+          : "")
+      + `<p style="font-size:14px;line-height:1.6">확인 순서 — ① Resend 대시보드에서 오늘 발송 건수 ② Cloudflare Worker 로그의 예외 ③ <code>/build</code> 후 <code>/send</code> 수동 실행.</p>`
       + `<p style="margin:18px 0 0;color:#999;font-size:12px">samsungda-newsletter · 발송 헬스체크</p></body></html>`;
     for (const to of REPORT_TOS) {
       try { await sendResendIdem(env, { to, subject: `⚠️ 기획 데일리 발송 리포트 없음 · ${date} (${dow}) — 발송 실패 의심`, html, idem: `health-miss-${date}-${to}` }); } catch { /* 경보 실패 무시 */ }
     }
     console.warn(`[헬스체크] ${date} 리포트 없음 — 발송 중단 의심, 경보 발송`);
-    return { ok: false, date, reason: "리포트 없음(발송 중단 의심)", alerted: true };
+    return { ok: false, date, reason: "리포트 없음(발송 중단 의심)", recovery, alerted: true };
   }
 
   let report = null;
