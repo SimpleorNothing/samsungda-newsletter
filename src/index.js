@@ -18,7 +18,7 @@
 import { SCFI_SEED } from "./scfi-seed.js";
 import { refreshInsights } from "./insights.js";
 import { CHANGELOG } from "./changelog.js";
-import { runSendWithReconcile } from "./postsend.js";
+import { runSendWithReconcile, checkSendHealth, getStoredReport } from "./postsend.js";
 
 const MI_NEWS = "https://mi.samsungda.net/data/news.json";
 const IDEA_URL = "https://idea.samsungda.net";              // 아이디어 뱅크 페이지: /#<id> 로 항목별 상세 연결
@@ -263,8 +263,31 @@ function analyzeSignals(history, data) {
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
-      await refreshInsights(env);   // 리서치 인사이트 주간 자동수집(가드 내장) — 발송과 독립된 데이터 갱신
-      await run(env, { send: true });
+      const cron = (event && event.cron) || "";
+      // ── cron별 역할 분리 ──────────────────────────────────────────
+      // Cloudflare 무료 플랜은 "한 실행당" 서브리퀘스트 50회 상한이 있다.
+      // 제작(지표·뉴스·AI 수집)이 40~50회를 쓰는 반면 발송은 5~10회에 불과하므로,
+      // 둘을 한 실행에 묶으면 뉴스가 많은 날 한도를 넘어 발송까지 통째로 끊긴다
+      // (2026-07-21 미발송 사고: Too many subrequests). 그래서 실행을 쪼갠다.
+      //   06:30 KST = 21:30 UTC → 제작 후 R2 저장
+      //   07:00 KST = 22:00 UTC → 저장본을 읽어 발송만
+      //   10:00 KST = 01:00 UTC → 사후 헬스체크(미발송 감지)
+      if (cron === "0 1 * * *") {
+        try { await checkSendHealth(env, { date: kstDate(), kstWeekday }); }
+        catch (e) { console.warn(`[헬스체크 실패] ${String((e && e.message) || e)}`); }
+        return;
+      }
+      if (cron === "0 22 * * *") {
+        try { await sendStored(env); }
+        catch (e) { console.error(`[발송 실패] ${String((e && e.message) || e)}`); }
+        return;
+      }
+      // 기본(06:30) — 제작. 인사이트 갱신은 제작·저장이 끝난 뒤에 돌려서,
+      // 인사이트가 서브리퀘스트를 소진해도 뉴스레터 저장본은 이미 확보되게 한다.
+      try { await buildAndStore(env); }
+      catch (e) { console.error(`[제작 실패] ${String((e && e.message) || e)}`); }
+      try { await refreshInsights(env); }
+      catch (e) { console.warn(`[인사이트 갱신 실패] ${String((e && e.message) || e)}`); }
     })());
   },
   async fetch(request, env) {
@@ -298,10 +321,34 @@ export default {
         return new Response("forbidden", { status: 403 });
       return json(await refreshInsights(env, { force: url.searchParams.get("force") !== "0" }));
     }
+    // [발송] 저장된 제작본을 발송(제작본 없으면 즉시 제작 폴백). 서브리퀘스트 절약 경로.
     if (url.pathname === "/send") {
       if (env.TRIGGER_KEY && url.searchParams.get("key") !== env.TRIGGER_KEY)
         return new Response("forbidden", { status: 403 });
-      return json(await run(env, { send: true }));
+      return json(await sendStored(env, { date: url.searchParams.get("d") || undefined }));
+    }
+    // [제작] 발송 없이 제작만 — 06:30 cron과 동일 동작을 수동 실행
+    if (url.pathname === "/build") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      return json(await buildAndStore(env));
+    }
+    // [리포트 조회] R2에 백업된 발송 리포트 열람 — /report?d=2026.07.21&key=
+    if (url.pathname === "/report") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      const d = url.searchParams.get("d") || kstDate();
+      const r = await getStoredReport(env, d);
+      if (!r) return new Response(`리포트 없음: ${d}`, { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+      return r.type === "html"
+        ? htmlResp(r.body)
+        : new Response(r.body, { headers: { "content-type": "application/json; charset=utf-8" } });
+    }
+    // [헬스체크 수동 실행] 리포트 부재 시 경보 발송
+    if (url.pathname === "/health-check") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      return json(await checkSendHealth(env, { date: url.searchParams.get("d") || kstDate(), kstWeekday }));
     }
     if (url.pathname === "/subscribers") {
       if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
@@ -453,7 +500,11 @@ async function allRecipients(env) {
 }
 
 // ---------- 발송 ----------
-async function run(env, { send }) {
+const OUTBOX_PREFIX = "outbox/";   // 제작 완료본(발송 대기) 보관 위치
+
+// [제작] 데이터 수집 → 렌더 → 아카이브·발송대기함 저장. 발송은 하지 않는다.
+// 서브리퀘스트를 가장 많이 쓰는 구간이라 발송과 분리해 단독 실행한다.
+async function buildAndStore(env) {
   await refreshFreight(env);  // 주간 운임(SCFI/FBX) web_search 캐시 갱신
   const data = await gatherData(env);
   const base = renderEmail(data);
@@ -464,16 +515,51 @@ async function run(env, { send }) {
     await env.RESEARCH.put(`${NL_PREFIX}${data.date}.html`, arc, meta);
     await env.RESEARCH.put(`${NL_PREFIX}latest.html`, arc, meta);
   } catch { /* 아카이브 실패 무시 */ }
-  // 누적 신호 스냅샷 + CI 센싱 후보 기록(실발송·cron 경로에서만 — preview는 오염 방지 위해 미기록)
+  // 발송대기함 — 07:00 발송 실행이 읽어갈 원본(__UNSUB__ 자리표시자 그대로 보존)
+  await env.RESEARCH.put(`${OUTBOX_PREFIX}${data.date}.html`, base, {
+    httpMetadata: { contentType: "text/html; charset=utf-8" },
+  });
+  // 누적 신호 스냅샷 + CI 센싱 후보 기록(제작 경로에서만 — preview는 오염 방지 위해 미기록)
   await persistSignals(env, data);
   await persistCiCandidates(env, data);
+  return { ok: true, built: true, date: data.date };
+}
 
-  if (!send) return { ok: true, sent: false };
+// [발송] 발송대기함의 제작본을 읽어 발송만 수행. 서브리퀘스트 소모가 작다.
+// 제작본이 없으면(제작 실패 등) 그 자리에서 제작까지 시도한다 — 미발송보다는 낫다.
+async function sendStored(env, { date } = {}) {
+  const d = date || kstDate();
+  const pub = (env.PUBLIC_URL || "").replace(/\/$/, "");
+  let base = null;
+  try {
+    const obj = await env.RESEARCH.get(`${OUTBOX_PREFIX}${d}.html`);
+    if (obj) base = await obj.text();
+  } catch { /* 아래 폴백 */ }
+
+  if (!base) {
+    console.warn(`[발송] ${d} 제작본 없음 — 즉시 제작 폴백 시도`);
+    try {
+      await buildAndStore(env);
+      const obj = await env.RESEARCH.get(`${OUTBOX_PREFIX}${d}.html`);
+      if (obj) base = await obj.text();
+    } catch (e) {
+      console.error(`[발송] 제작 폴백 실패 — ${String((e && e.message) || e)}`);
+    }
+  }
+  if (!base) return { ok: false, error: `제작본 없음: ${d}` };
+
   // 발송 2-pass(재대조 재발송) + 일일 발송리포트 → postsend.js 위임
   return runSendWithReconcile(env, {
-    data, base, pub,
+    data: { date: d }, base, pub,
     deps: { allRecipients, signToken, signKey, kstWeekday },
   });
+}
+
+// 기존 run() 시그니처 유지(호환) — send:true면 제작 후 발송(수동 경로용).
+async function run(env, { send }) {
+  const built = await buildAndStore(env);
+  if (!send) return { ok: true, sent: false, ...built };
+  return sendStored(env, { date: built.date });
 }
 
 // ---------- 데이터 수집 ----------
