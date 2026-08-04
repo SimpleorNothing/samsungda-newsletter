@@ -970,10 +970,51 @@ function isOwnCompanyNews(n) {
 function isLgNews(n) {
   return (n.competitors || []).includes("LG전자");
 }
+// 특정 기업과 무관한 거시·지정학 기사 판별.
+// 기업명이 명시된 복합 기사는 기업 기사로 유지하고, 기업 태그가 없는 기사만 매크로 후보로 본다.
+function isMacroNews(n) {
+  const comps = (n.competitors || []).filter(Boolean);
+  if (comps.length) return false;
+  const text = [
+    n.title, n.headline, n.summary, n.content, n.category,
+    ...(Array.isArray(n.tags) ? n.tags : []),
+  ].filter(Boolean).join(" ");
+  return /(이란|호르무즈|중동\s*(?:전쟁|분쟁|긴장)|지정학|관세|환율|무역전쟁|전쟁|정상회담|경제제재|원유\s*(?:공급|가격)|글로벌\s*(?:경제|경기)|금리\s*(?:인상|인하|동결))/i.test(text);
+}
+
+// 같은 기업의 기사를 인접 배치하고, 특정 기업과 무관한 매크로·지정학 기사는 맨 아래로 보낸다.
+// 회사 그룹과 비기업 산업 기사의 최초 등장 순서는 유지해 기존 중요도 정렬을 최대한 보존한다.
+function orderSelectedNews(items) {
+  const nonMacro = items.filter(n => !isMacroNews(n));
+  const macro = items.filter(isMacroNews);
+  const emitted = new Set();
+  const ordered = [];
+
+  for (const n of nonMacro) {
+    if (emitted.has(n)) continue;
+    const companies = (n.competitors || []).filter(Boolean);
+    if (!companies.length) {
+      emitted.add(n);
+      ordered.push(n);
+      continue;
+    }
+    const related = nonMacro.filter(candidate =>
+      !emitted.has(candidate)
+      && (candidate.competitors || []).some(company => companies.includes(company))
+    );
+    for (const candidate of related) {
+      emitted.add(candidate);
+      ordered.push(candidate);
+    }
+  }
+  return ordered.concat(macro);
+}
+
 // 표시용 뉴스 선별: grade·impact 정렬된 풀에서 최대 limit건.
 //  - 당사(삼성) 단독기사는 최대 ownCap건만 채택.
 //  - LG전자 기사는 최대 lgCap건만 채택(초과분은 건너뛰고 비-LG 기사로 자동 충당).
-// 나머지 자리는 경쟁사·소비자·기술 등 비당사 기사로 자동 충당(정렬 순서 유지).
+//  - 선별 후 동일 기업 기사를 인접 배치하고, 매크로·지정학 기사는 맨 아래로 이동.
+// 나머지 자리는 경쟁사·소비자·기술 등 비당사 기사로 자동 충당.
 function selectNews(pool, limit = 5, ownCap = 1, lgCap = 3) {
   const out = [];
   let ownCount = 0, lgCount = 0;
@@ -988,7 +1029,7 @@ function selectNews(pool, limit = 5, ownCap = 1, lgCap = 3) {
     }
     out.push(n);
   }
-  return out;
+  return orderSelectedNews(out);
 }
 
 // CI 보드(경쟁사 전략 추적)의 사람이 검토·확정한 최근 동향(evidence.json) — strategies.json의
