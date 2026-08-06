@@ -1223,25 +1223,21 @@ function sectionInsights(data) {
     consume = `${lead}${tail} (${conEv.join("·")})`;
   }
 
-  // ── 가전뉴스: 테마·전략축 기반 구조 요약 (건수·제목 나열 대신 '무엇에 관한 소식인지' + LG 전략축) ──
+  // ── 가전뉴스: 기사 데이터만으로 구조 요약 ──
+  // AI 요약 실패 시에도 기획 인사이트·CI 전략축을 시장 동향에 섞지 않는다.
   const nv = data.news || [];
   let news = "";
   if (nv.length) {
     // 제품 테마 상위 (에어컨·빌트인·공조 등)
     const pc = {}; nv.forEach(n => (n.products || []).forEach(p => { if (p) pc[p] = (pc[p] || 0) + 1; }));
     const topProd = Object.entries(pc).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
-    // LG 전략축(A1~A6) 클러스터 — 각 뉴스 표면 매칭 후 최다 빈도 상위 2축
-    const axHits = {};
-    nv.forEach(n => { const seen = new Set(); for (const a of matchAxes(n)) { if (seen.has(a.code)) continue; seen.add(a.code); (axHits[a.code] = axHits[a.code] || { code: a.code, title: a.title, cnt: 0 }).cnt++; } });
-    const topAx = Object.values(axHits).sort((a, b) => b.cnt - a.cnt).slice(0, 2);
     const comp = [...new Set(nv.flatMap(n => n.competitors || []))].slice(0, 3);
     const lc = {}; nv.forEach(n => { if (n.lens) lc[n.lens] = (lc[n.lens] || 0) + 1; });
     const dom = Object.entries(lc).sort((a, b) => b[1] - a[1])[0];
     const head = topProd.length ? `${topProd.join("·")} 관련 소식이 주를 이룸` : "가전 전반 동향";
     const compPart = comp.length ? `, ${comp.join("·")} 중심` : "";
-    const axPart = topAx.length ? ` — ${topAx.map(a => a.title).join("·")} 흐름에 닿는 신호` : "";
     const lensPart = dom ? `, ${dom[0]} 비중이 큼` : "";
-    news = `${head}${compPart}${axPart}${lensPart} (${nv.length}건)`;
+    news = `${head}${compPart}${lensPart} (${nv.length}건)`;
   }
 
   return { consume, cost, news };
