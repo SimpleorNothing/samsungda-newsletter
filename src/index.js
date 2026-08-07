@@ -233,17 +233,27 @@ function analyzeSignals(history, data) {
     return dir * run;
   };
   const sp = v => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-  // 환율(생산거점 통화 강세 = 원가 상승, 원화 강세 = 원가 하락)
-  const fx = [["krw", "원/달러"], ["mxn", "페소"], ["thb", "바트"], ["vnd", "동"], ["inr", "루피"], ["pln", "즈워티"]];
-  for (const [k, nm] of fx) {
-    const c = cum(k), st = streak(k);
+  // 환율: "USD 1 = 현지통화" 환율 숫자와 해당 통화 강·약세를 반드시 함께 표시
+  for (const meta of FX_META) {
+    const c = cum(meta.key), st = streak(meta.key);
+    const currencyStrength = c == null ? null : (c <= 0 ? "강세" : "약세");
+    const costDetail = meta.key === "krw"
+      ? (currencyStrength === "강세" ? "달러 결제 부품·원자재 원화환산 원가 하락 요인" : "수입 부품 원가 상승 요인")
+      : (currencyStrength === "강세" ? "현지 조달·인건비 달러환산 원가 상승 요인" : "현지 조달·인건비 달러환산 원가 하락 요인");
     if (c != null && Math.abs(c) >= 1.5) {
-      const detail = k === "krw"
-        ? (c < 0 ? "원화 강세 — 달러 결제 부품·원자재 원화환산 원가 하락 요인" : "원화 약세 — 수입 부품 원가 상승 요인")
-        : (c >= 0 ? "현지통화 약세 — 현지 조달·인건비 달러환산 하락 요인" : "현지통화 강세 — 현지 원가 상승 요인");
-      breaches.push({ label: `${nm} 주간 ${sp(c)}`, detail, dir: Math.sign(c) });
+      breaches.push({
+        label: `${meta.quote} 환율 주간 ${sp(c)} (${meta.currency} ${currencyStrength})`,
+        detail: `${meta.currency} ${currencyStrength} — ${costDetail}`,
+        dir: Math.sign(c),
+      });
     } else if (Math.abs(st) >= 4) {
-      breaches.push({ label: `${nm} ${Math.abs(st)}일 연속 ${st > 0 ? "상승" : "하락"}`, detail: "방향성 지속 — 추세 형성 구간", dir: Math.sign(st) });
+      const quoteDir = st > 0 ? "상승" : "하락";
+      const strength = st > 0 ? "약세" : "강세";
+      breaches.push({
+        label: `${meta.quote} 환율 ${Math.abs(st)}일 연속 ${quoteDir} (${meta.currency} ${strength})`,
+        detail: `${meta.currency} ${strength} — 방향성 지속 구간`,
+        dir: Math.sign(st),
+      });
     }
   }
   const cWti = cum("wti");
@@ -1113,14 +1123,54 @@ function safeDecode(s) { try { return decodeURIComponent(s); } catch { return s;
 // ---------- AI 맥락 브리핑 ----------
 const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 100;
 function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
+
+// Yahoo 환율은 모두 "USD 1 = 현지통화" 직접표기다.
+// 환율 숫자와 통화가치는 반대로 움직이므로 강·약세 판정은 역수 변화율로 계산한다.
+const FX_META = [
+  { sym: "KRW=X", key: "krw", quote: "원/달러", currency: "원화", aliases: ["원화"] },
+  { sym: "MXN=X", key: "mxn", quote: "달러/페소", currency: "페소", aliases: ["멕시코 페소", "페소"] },
+  { sym: "THB=X", key: "thb", quote: "달러/바트", currency: "바트", aliases: ["태국 바트", "바트"] },
+  { sym: "VND=X", key: "vnd", quote: "달러/동", currency: "동", aliases: ["베트남 동", "동"] },
+  { sym: "INR=X", key: "inr", quote: "달러/루피", currency: "루피", aliases: ["인도 루피", "루피"] },
+  { sym: "PLN=X", key: "pln", quote: "달러/즈워티", currency: "즈워티", aliases: ["폴란드 즈워티", "즈워티"] },
+];
+export function fxDirection(current, base) {
+  if (current == null || base == null || !current || !base) return null;
+  const quotePct = pctOf(current, base);
+  const currencyPct = (base / current - 1) * 100;
+  return { quotePct, currencyPct, strength: currencyPct >= 0 ? "강세" : "약세" };
+}
+export function hasFxDirectionConflict(text, q = {}) {
+  const s = String(text || "").replace(/\s+/g, " ");
+  if (!s) return false;
+  return FX_META.some(meta => {
+    const o = q[meta.sym], mv = o && fxDirection(o.price, o.first6m);
+    if (!mv) return false;
+    const expected = mv.strength, opposite = expected === "강세" ? "약세" : "강세";
+    return meta.aliases.some(alias =>
+      new RegExp(`${alias.replace(/[.*+?^\${}()|[\\]\\]/g, "\\const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 100;
+function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
+function summaryContext(data) {")}.{0,12}${opposite}`).test(s)
+    );
+  });
+}
 function summaryContext(data) {
   const q = data.q, m = data.macro, s = data.freight, L = [];
   // 시장지표는 6개월 추이 델타를 1차 기준으로(해석 앵커) + 최근 전일/전월은 단기 보조로 병기
   const t6 = (sym, nm, dp, shortNm, shortRef) => { const o = q[sym]; if (!o) return; L.push(`${nm} ${o.price.toFixed(dp)} (6개월 ${sPct(pctOf(o.price, o.first6m))}, 최근 ${shortNm} ${sPct(pctOf(o.price, o[shortRef]))})`); };
-  // 환율(6M)
-  t6("KRW=X", "원/달러", 1, "전일", "prevDay");
-  t6("MXN=X", "멕시코 페소", 2, "전일", "prevDay");
-  t6("THB=X", "태국 바트", 2, "전일", "prevDay");
+  // 환율(6M): 환율 숫자 변화와 통화가치 변화를 함께 명시해 방향 오독을 방지
+  const tFx = (sym, dp) => {
+    const o = q[sym], meta = FX_META.find(x => x.sym === sym);
+    if (!o || !meta) return;
+    const m6 = fxDirection(o.price, o.first6m), md = fxDirection(o.price, o.prevDay);
+    L.push(`${meta.quote} ${o.price.toFixed(dp)} (USD 1=${meta.currency}, 6개월 환율 ${sPct(m6 && m6.quotePct)} → ${meta.currency} ${m6 ? m6.strength : "판정불가"} ${sPct(m6 && m6.currencyPct)}, 최근 전일 환율 ${sPct(md && md.quotePct)})`);
+  };
+  tFx("KRW=X", 1);
+  tFx("MXN=X", 2);
+  tFx("THB=X", 2);
+  tFx("VND=X", 2);
+  tFx("INR=X", 2);
+  tFx("PLN=X", 2);
   // 원가 시장지표(6M)
   t6("CL=F", "WTI", 1, "전일", "prevDay");
   t6("HG=F", "구리", 2, "전월", "prevMonth");
@@ -1344,10 +1394,14 @@ async function aiSummary(env, data) {
           const legacy = typeof it.why === "string" ? clampPhrase(stripCiAxisCodes(it.why), 140) : "";
           if (content || opportunity || threat || legacy) newsWhy[it.idx] = { content: content || legacy, opportunity, threat };
         }
-        const hero = str(parsed.hero, 220);
+        const parsedHero = str(parsed.hero, 220);
+        const parsedCost = str(parsed.cost, 200);
+        // AI가 환율 숫자 하락을 통화 약세로 뒤집어 쓴 경우 해당 문장을 규칙 기반 결과로 교체한다.
+        const hero = hasFxDirectionConflict(parsedHero, data.q) ? ruleSummary(data).hero : parsedHero;
+        const cost = hasFxDirectionConflict(parsedCost, data.q) ? rs.cost : (parsedCost || rs.cost);
         if (hero) return {
           hero,
-          sec: { consume: str(parsed.consume, 200) || rs.consume, cost: str(parsed.cost, 200) || rs.cost, news: str(parsed.newsSummary, 180) || rs.news },
+          sec: { consume: str(parsed.consume, 200) || rs.consume, cost, news: str(parsed.newsSummary, 180) || rs.news },
           newsWhy,
         };
       } else {
