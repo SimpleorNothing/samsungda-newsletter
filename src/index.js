@@ -1146,10 +1146,10 @@ export function hasFxDirectionConflict(text, q = {}) {
   return FX_META.some(meta => {
     const o = q[meta.sym], mv = o && fxDirection(o.price, o.first6m);
     if (!mv) return false;
-    const expected = mv.strength, opposite = expected === "강세" ? "약세" : "강세";
-    return meta.aliases.some(alias =>
-      new RegExp(`${alias.replace(/[.*+?^\${}()|[\\]\\]/g, "\\const pctOf = (c, b) => (c == null || b == null || !b) ? null : (c - b) / b * 100;
-function sPct(v) { return v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`; }
+    const opposite = mv.strength === "강세" ? "약세" : "강세";
+    return meta.aliases.some(alias => new RegExp(`${alias}.{0,12}${opposite}`).test(s));
+  });
+}
 function summaryContext(data) {")}.{0,12}${opposite}`).test(s)
     );
   });
