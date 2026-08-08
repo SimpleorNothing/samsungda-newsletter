@@ -16,6 +16,7 @@
 //                     AI 요약 프롬프트에 "검증된 최근 동향"으로 제공 — 위 CI라우팅(미검증 후보)보다 우선 신뢰.
 
 import { SCFI_SEED } from "./scfi-seed.js";
+import { TOPIC_CAP, TOPIC_MIN, topicBlocked } from "./diversity.js";
 import { refreshInsights } from "./insights.js";
 import { CHANGELOG } from "./changelog.js";
 import { runSendWithReconcile, checkSendHealth, getStoredReport } from "./postsend.js";
@@ -992,54 +993,93 @@ function isMacroNews(n) {
   return /(이란|호르무즈|중동\s*(?:전쟁|분쟁|긴장)|지정학|관세|환율|무역전쟁|전쟁|정상회담|경제제재|원유\s*(?:공급|가격)|글로벌\s*(?:경제|경기)|금리\s*(?:인상|인하|동결))/i.test(text);
 }
 
-// 같은 기업의 기사를 인접 배치하고, 특정 기업과 무관한 매크로·지정학 기사는 맨 아래로 보낸다.
-// 회사 그룹과 비기업 산업 기사의 최초 등장 순서는 유지해 기존 중요도 정렬을 최대한 보존한다.
-function orderSelectedNews(items) {
-  const nonMacro = items.filter(n => !isMacroNews(n));
-  const macro = items.filter(isMacroNews);
-  const emitted = new Set();
-  const ordered = [];
-
-  for (const n of nonMacro) {
-    if (emitted.has(n)) continue;
-    const companies = (n.competitors || []).filter(Boolean);
-    if (!companies.length) {
-      emitted.add(n);
-      ordered.push(n);
-      continue;
-    }
-    const related = nonMacro.filter(candidate =>
-      !emitted.has(candidate)
-      && (candidate.competitors || []).some(company => companies.includes(company))
-    );
-    for (const candidate of related) {
-      emitted.add(candidate);
-      ordered.push(candidate);
-    }
-  }
-  return ordered.concat(macro);
+// 뉴스 성격 분류 — 시장 동향 5건을 경쟁사 중심으로 편성하되 유관산업/기술·정책/규제를 함께 섞는다.
+function newsText(n) {
+  return [n.title, n.headline, n.summary, n.content, n.category, n.lens,
+    ...(Array.isArray(n.tags) ? n.tags : []), ...(Array.isArray(n.products) ? n.products : [])]
+    .filter(Boolean).join(" ");
+}
+function isPolicyNews(n) {
+  const text = newsText(n);
+  return isMacroNews(n)
+    || /(정책|규제|관세|무역\s*(?:규제|협정|제한)|수입\s*(?:제한|규제|관세)|수출\s*(?:통제|규제)|법안|행정명령|정부\s*(?:정책|규정)|보조금|세액공제|에너지\s*효율|에너지스타|ENERGY\s*STAR|DOE|냉매|HFC|AIM\s*Act|제재)/i.test(text);
+}
+function isCompetitorNews(n) {
+  if (isPolicyNews(n)) return false;
+  const comps = (n.competitors || []).filter(c => c && c !== "삼성전자");
+  return comps.length > 0;
+}
+function newsBucket(n) {
+  if (isPolicyNews(n)) return "policy";
+  if (isCompetitorNews(n)) return "competitor";
+  return "industry";
 }
 
-// 표시용 뉴스 선별: grade·impact 정렬된 풀에서 최대 limit건.
-//  - 당사(삼성) 단독기사는 최대 ownCap건만 채택.
-//  - LG전자 기사는 최대 lgCap건만 채택(초과분은 건너뛰고 비-LG 기사로 자동 충당).
-//  - 선별 후 동일 기업 기사를 인접 배치하고, 매크로·지정학 기사는 맨 아래로 이동.
-// 나머지 자리는 경쟁사·소비자·기술 등 비당사 기사로 자동 충당.
+// 동일 기업 기사는 붙여 두되, 큰 순서는 경쟁사 → 유관산업/기술 → 정책·규제로 고정한다.
+function orderSelectedNews(items) {
+  const groupCompanies = arr => {
+    const emitted = new Set(), ordered = [];
+    for (const n of arr) {
+      if (emitted.has(n)) continue;
+      const companies = (n.competitors || []).filter(Boolean);
+      if (!companies.length) { emitted.add(n); ordered.push(n); continue; }
+      for (const candidate of arr) {
+        if (emitted.has(candidate)) continue;
+        if ((candidate.competitors || []).some(company => companies.includes(company))) {
+          emitted.add(candidate); ordered.push(candidate);
+        }
+      }
+    }
+    return ordered;
+  };
+  const competitor = items.filter(n => newsBucket(n) === "competitor");
+  const industry = items.filter(n => newsBucket(n) === "industry");
+  const policy = items.filter(n => newsBucket(n) === "policy");
+  return [...groupCompanies(competitor), ...groupCompanies(industry), ...groupCompanies(policy)];
+}
+
+// 표시용 뉴스 선별 — 5건 기준 기본 배분 3:1:1.
+// 경쟁사 3 · 유관산업/기술 1 · 정책/규제/거시 1.
+// 동일 주제는 원칙 1건, 후보 부족 시에만 최대 2건, 정말 부족할 때만 3건까지 완화한다.
 function selectNews(pool, limit = 5, ownCap = 1, lgCap = 3) {
   const out = [];
   let ownCount = 0, lgCount = 0;
-  for (const n of pool) {
-    if (out.length >= limit) break;
-    if (isOwnCompanyNews(n)) {
-      if (ownCount >= ownCap) continue;
-      ownCount++;
-    } else if (isLgNews(n)) {
-      if (lgCount >= lgCap) continue;
-      lgCount++;
-    }
+
+  const eligible = (n, topicCap) => {
+    if (out.includes(n) || topicBlocked(n, out, topicCap)) return false;
+    if (isOwnCompanyNews(n) && ownCount >= ownCap) return false;
+    if (!isOwnCompanyNews(n) && isLgNews(n) && lgCount >= lgCap) return false;
+    return true;
+  };
+  const add = n => {
     out.push(n);
-  }
-  return orderSelectedNews(out);
+    if (isOwnCompanyNews(n)) ownCount++;
+    else if (isLgNews(n)) lgCount++;
+  };
+  const pick = (bucket, need, topicCap) => {
+    let got = 0;
+    for (const n of pool) {
+      if (out.length >= limit || got >= need) break;
+      if (bucket && newsBucket(n) !== bucket) continue;
+      if (!eligible(n, topicCap)) continue;
+      add(n); got++;
+    }
+    return got;
+  };
+
+  const policyTarget = limit >= 3 ? 1 : 0;
+  const industryTarget = limit >= 4 ? 1 : 0;
+  const competitorTarget = Math.max(0, limit - policyTarget - industryTarget);
+
+  pick("competitor", competitorTarget, 1);
+  pick("industry", industryTarget, 1);
+  pick("policy", policyTarget, 1);
+
+  if (out.length < limit) pick(null, limit - out.length, 1);
+  if (out.length < limit) pick(null, limit - out.length, TOPIC_CAP);
+  if (out.length < limit) pick(null, limit - out.length, TOPIC_MIN);
+
+  return orderSelectedNews(out.slice(0, limit));
 }
 
 // CI 보드(경쟁사 전략 추적)의 사람이 검토·확정한 최근 동향(evidence.json) — strategies.json의
