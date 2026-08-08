@@ -1,0 +1,185 @@
+name: Apply newsletter mix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apply-news-mix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch market-news mix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/index.js')
+          s = p.read_text()
+
+          imp = 'import { TOPIC_CAP, TOPIC_MIN, topicBlocked } from "./diversity.js";\n'
+          anchor = 'import { SCFI_SEED } from "./scfi-seed.js";\n'
+          if imp not in s:
+              if anchor not in s:
+                  raise SystemExit('import anchor not found')
+              s = s.replace(anchor, anchor + imp, 1)
+
+          start = s.index('// 같은 기업의 기사를 인접 배치하고, 특정 기업과 무관한 매크로·지정학 기사는 맨 아래로 보낸다.')
+          end = s.index('// CI 보드(경쟁사 전략 추적)', start)
+
+          new_block = r'''// 뉴스 성격 분류 — 시장 동향 5건을 경쟁사 중심으로 편성하되 유관산업/기술·정책/규제를 함께 섞는다.
+function newsText(n) {
+  return [n.title, n.headline, n.summary, n.content, n.category, n.lens,
+    ...(Array.isArray(n.tags) ? n.tags : []), ...(Array.isArray(n.products) ? n.products : [])]
+    .filter(Boolean).join(" ");
+}
+function isPolicyNews(n) {
+  const text = newsText(n);
+  return isMacroNews(n)
+    || /(정책|규제|관세|무역\s*(?:규제|협정|제한)|수입\s*(?:제한|규제|관세)|수출\s*(?:통제|규제)|법안|행정명령|정부\s*(?:정책|규정)|보조금|세액공제|에너지\s*효율|에너지스타|ENERGY\s*STAR|DOE|냉매|HFC|AIM\s*Act|제재)/i.test(text);
+}
+function isCompetitorNews(n) {
+  if (isPolicyNews(n)) return false;
+  const comps = (n.competitors || []).filter(c => c && c !== "삼성전자");
+  return comps.length > 0;
+}
+function newsBucket(n) {
+  if (isPolicyNews(n)) return "policy";
+  if (isCompetitorNews(n)) return "competitor";
+  return "industry";
+}
+
+// 동일 기업 기사는 붙여 두되, 큰 순서는 경쟁사 → 유관산업/기술 → 정책·규제로 고정한다.
+// 정책·거시 이슈가 여러 건 있어도 앞쪽 경쟁사 동향을 밀어내지 않도록 한다.
+function orderSelectedNews(items) {
+  const groupCompanies = arr => {
+    const emitted = new Set(), ordered = [];
+    for (const n of arr) {
+      if (emitted.has(n)) continue;
+      const companies = (n.competitors || []).filter(Boolean);
+      if (!companies.length) {
+        emitted.add(n); ordered.push(n); continue;
+      }
+      for (const candidate of arr) {
+        if (emitted.has(candidate)) continue;
+        if ((candidate.competitors || []).some(company => companies.includes(company))) {
+          emitted.add(candidate); ordered.push(candidate);
+        }
+      }
+    }
+    return ordered;
+  };
+  const competitor = items.filter(n => newsBucket(n) === "competitor");
+  const industry = items.filter(n => newsBucket(n) === "industry");
+  const policy = items.filter(n => newsBucket(n) === "policy");
+  return [...groupCompanies(competitor), ...groupCompanies(industry), ...groupCompanies(policy)];
+}
+
+// 표시용 뉴스 선별 — 5건 기준 기본 배분 3:1:1.
+//  - 경쟁사 3건: 전략·신제품·투자·생산·유통 등 경쟁사 직접 동향을 기본 축으로 삼는다.
+//  - 유관산업/기술 1건: HVAC·로봇·스마트홈·부품/공급망 등.
+//  - 정책/규제/거시 1건: 관세·무역규제·효율/냉매 규제·지정학 등. 화면에서는 뒤쪽 배치.
+//  - 1차 선별은 동일 주제 1건을 원칙으로 하고, 후보 부족 시에만 2건(TOPIC_CAP), 마지막으로 TOPIC_MIN까지 완화한다.
+//  - 특정 버킷이 부족하면 다른 버킷의 다음 순위 기사로 자동 충당하되 주제 다양성은 계속 우선한다.
+function selectNews(pool, limit = 5, ownCap = 1, lgCap = 3) {
+  const out = [];
+  let ownCount = 0, lgCount = 0;
+
+  const eligible = (n, topicCap) => {
+    if (out.includes(n) || topicBlocked(n, out, topicCap)) return false;
+    if (isOwnCompanyNews(n) && ownCount >= ownCap) return false;
+    if (!isOwnCompanyNews(n) && isLgNews(n) && lgCount >= lgCap) return false;
+    return true;
+  };
+  const add = n => {
+    out.push(n);
+    if (isOwnCompanyNews(n)) ownCount++;
+    else if (isLgNews(n)) lgCount++;
+  };
+  const pick = (bucket, need, topicCap) => {
+    let got = 0;
+    for (const n of pool) {
+      if (out.length >= limit || got >= need) break;
+      if (bucket && newsBucket(n) !== bucket) continue;
+      if (!eligible(n, topicCap)) continue;
+      add(n); got++;
+    }
+    return got;
+  };
+
+  const policyTarget = limit >= 3 ? 1 : 0;
+  const industryTarget = limit >= 4 ? 1 : 0;
+  const competitorTarget = Math.max(0, limit - policyTarget - industryTarget);
+
+  pick("competitor", competitorTarget, 1);
+  pick("industry", industryTarget, 1);
+  pick("policy", policyTarget, 1);
+
+  if (out.length < limit) pick(null, limit - out.length, 1);
+  if (out.length < limit) pick(null, limit - out.length, TOPIC_CAP);
+  if (out.length < limit) pick(null, limit - out.length, TOPIC_MIN);
+
+  return orderSelectedNews(out.slice(0, limit));
+}
+
+'''
+          s = s[:start] + new_block + s[end:]
+          p.write_text(s)
+
+          cp = Path('src/changelog.js')
+          c = cp.read_text()
+          entry = '  { d: "2026.08.08", t: "시장 동향을 경쟁사 중심 3:1:1로 배분 — 경쟁사 3·유관산업/기술 1·정책/규제 1, 동일 주제는 원칙 1건(부족 시 최대 2건)" },\n'
+          marker = 'export const CHANGELOG = [\n'
+          if entry not in c:
+              c = c.replace(marker, marker + entry, 1)
+              cp.write_text(c)
+
+          gp = Path('NEWSLETTER_GUIDE.md')
+          g = gp.read_text()
+          sec = '## 6. 시장 동향 주제 배분\n\n'
+          rule = '''1. **기본 편성은 경쟁사 중심 3:1:1.** 5건 기준 경쟁사 3건(약 60%) · 유관산업/기술 1건(약 20%) · 정책/규제/거시 1건(약 20%)을 우선한다. 해당 영역의 후보가 부족하면 다른 영역으로 자동 충당한다.\n2. **경쟁사 직접 동향 우선.** LG전자·Whirlpool·Haier/GE Appliances·Electrolux·Midea·BSH 등 전략·신제품·투자·생산·유통 변화를 시장 동향의 기본 축으로 삼는다.\n3. **동일 주제 편중 방지.** 같은 이슈는 원칙적으로 1건만 채택하고, 다른 주제 후보가 부족할 때만 최대 2건까지 허용한다.\n4. **배치 순서.** 경쟁사 → 유관산업/기술 → 정책·규제·거시 순으로 배치한다.\n'''
+          if rule not in g:
+              if sec not in g:
+                  raise SystemExit('guide section not found')
+              g = g.replace(sec, sec + rule, 1)
+          g = re.sub(r'> 최종 업데이트: .*?\(KST\)', '> 최종 업데이트: 2026-08-08 15:06 (KST)', g, count=1)
+          hist = '## 변경 이력\n'
+          hentry = '- **2026-08-08 15:06 (KST)** — 시장 동향 경쟁사 중심 3:1:1 배분 및 동일 주제 1건 우선 규칙 적용\n'
+          if hentry not in g:
+              g = g.replace(hist, hist + hentry, 1)
+          gp.write_text(g)
+
+          wf = Path('.github/workflows/apply-news-mix.yml')
+          if wf.exists():
+              wf.unlink()
+          PY
+
+      - name: Syntax check
+        run: node --check src/index.js && node --check src/diversity.js && node --check src/changelog.js
+
+      - name: Commit applied change
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "[nl] 시장 동향 경쟁사 중심 3:1:1 배분" || exit 0
+          git push origin HEAD:main
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4"
+          command: deploy
