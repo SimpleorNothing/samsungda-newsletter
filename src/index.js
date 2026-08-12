@@ -1602,8 +1602,8 @@ export function renderEmail(data, opts = {}) {
   ].filter(Boolean).join(dot);
   const fxParts = [
     q["KRW=X"] ? `원/달러 <b>${fmt(q["KRW=X"].price, 1)}</b>${badge6(q["KRW=X"])}` : null,
-    q["MXN=X"] ? `멕시코 페소 <b>${fmt(q["MXN=X"].price)}</b>` : null,
-    q["THB=X"] ? `태국 바트 <b>${fmt(q["THB=X"].price)}</b>` : null,
+    q["MXN=X"] ? `멕시코 페소 <b>${fmt(q["MXN=X"].price)}</b>${badge6(q["MXN=X"])}` : null,
+    q["THB=X"] ? `태국 바트 <b>${fmt(q["THB=X"].price)}</b>${badge6(q["THB=X"])}` : null,
   ].filter(Boolean).join(dot);
   const cost = [
     matParts ? line(`${lbl("원자재 :")} ${matParts}`) : "",
