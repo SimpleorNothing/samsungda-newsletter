@@ -1,8 +1,8 @@
 # 기획 데일리 뉴스레터 — 작업가이드
 
-> 버전: v1.3
+> 버전: v1.4
 >
-> 최종 업데이트: 2026-08-14 12:34 (KST)
+> 최종 업데이트: 2026-08-14 12:40 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -75,7 +75,8 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 - **백본 (자동수집)**: McKinsey 네이티브 RSS(`/insights/rss`) — State of the Consumer 등 소비·리테일 인사이트.
 - **부정기 큐레이션**: Deloitte · BCG · Bain · Accenture · PwC · Kearney · Roland Berger · Oliver Wyman — 이메일 뉴스레터 또는 서드파티 RSS 생성기 경유. 상당수 이메일 게이트(등록 필요).
 - **Deloitte Korea 인사이트 허브** (`deloitte.com/kr` · 한국어) ⭐: 인사이트 리포트 목록(`/kr/ko/our-thinking/deloitte-insights.html`) · 월간 **Trend Tracker**(`/kr/ko/our-thinking/Monthly-Trend-Tracker/trend-tracker-YYYY-MM.html` — '이번 달 발간분' 인덱스라 최근 1개월 스캔에 최적) · 주간 **글로벌 경제리뷰**(`/kr/ko/our-thinking/global-economic-review/ger-YYYY-MM-Nst.html` — 매주 금요일) · **Consumer Signals**(분기, 국내 소비심리). 한국어·국내 시사점 포함이라 DA 기획 인용에 직결. DA 우선 픽: Consumer Signals·소비재/유통 전망·관세/통상·에너지(HVAC·전력)·순환경제. 리스트 페이지에 발행일 미표기 → **Trend Tracker(월)·경제리뷰(주차)로 발간 시점 앵커링**.
-- **인용 규율**: 수치·발행일 반드시 확인. **균형 인용** — 컨설팅 낙관 전망엔 상반 데이터·caveat 병기(예: AI 가전 낙관치 ↔ BOK 이슈노트 "AI 생산성 효과 아직 불명확").
+- **노출 기간 3개월 상한** ⭐: 리서치 인사이트 카드는 **발행일이 당월 포함 최근 3개월 이내**인 것만 노출한다(예: 2026-08이면 2026.06~2026.08). 연도만 표기된 카드(`2025` 등)는 월 특정 불가로 간주해 제외. `src/insights.js`의 `filterRecentInsights()`가 ① 큐레이션 저장 직전·② `loadInsights()` 표시 직전 두 지점에서 강제하며, R2 피드·코드 내장 SEED 모두 동일 적용된다. 필터 후 6개 미만이면 남는 만큼만 노출한다(재큐레이션 안 함). 카드를 다시 채우려면 주간 가드 때문에 `/refresh-insights?key=&force=1` 수동 호출이 필요.
+- **인용 규율**: 수치·발행일 반드시 확인. **수치 기준 시점도 3개월 이내**(발행일과 별개 판정 — 최근 보고서가 과거 수치를 재인용한 경우 제외). **균형 인용** — 컨설팅 낙관 전망엔 상반 데이터·caveat 병기(예: AI 가전 낙관치 ↔ BOK 이슈노트 "AI 생산성 효과 아직 불명확").
 
 ### 2-8. 가전 기술 트렌드 (C 유형 · 기술/제품)
 - **CES / CTA** (`cta.tech`): 매년 1월 최대 가전·전자 트렌드 소스 — 오프라인 음성제어·Matter 생태계·AI 자율 조리·빌트인 미니멀 디자인. 삼성 Bespoke·경쟁사 신제품 공개. 연 1회 집중(부정기 큐레이션).
@@ -168,6 +169,8 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-08-14 12:40 (KST)** — v1.4: 리서치 인사이트 카드 노출 기간 3개월 상한 규칙(§2-7) 신설 — `filterRecentInsights()` 이중 적용(R2 피드·SEED 공통)
+- **2026-08-14 12:34 (KST)** — 장애 복구: `src/index.js`가 웹 에디터 붙여넣기 truncation으로 117,988B에서 잘렸던 것을 복원(누락 102행 재입력). ⚠ 126KB 파일은 모바일 전체 붙여넣기 금지 — 변경 구간만 조각으로 반영할 것
 - **2026-08-14 12:34 (KST)** — index.js 업데이트 (`00dacb7`)
 - **2026-08-14 12:24 (KST)** — fix(insights): filterRecentInsights 추가 — main의 index.js import 대응 (`a99f733`)
 - **2026-08-14 12:20 (KST)** — index.js 업데이트 (`65b2abb`)
