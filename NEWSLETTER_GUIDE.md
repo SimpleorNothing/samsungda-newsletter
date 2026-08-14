@@ -2,7 +2,7 @@
 
 > 버전: v1.3
 >
-> 최종 업데이트: 2026-08-14 12:20 (KST)
+> 최종 업데이트: 2026-08-14 12:24 (KST)
 
 `samsungda-newsletter` (Cloudflare Worker + Cron). 삼성전자 생활가전(DA) 기획자용 데일리 브리핑.
 콘텐츠 로직 단일 기준. 화면 라벨은 2026-07-06 발송본(개편 완료본) 기준.
@@ -168,6 +168,7 @@ CI 보드(`ci.samsungda.net`) 자체 팔레트를 상속(`T` 객체). 기본 토
 ---
 
 ## 변경 이력
+- **2026-08-14 12:24 (KST)** — fix(insights): filterRecentInsights 추가 — main의 index.js import 대응 (`a99f733`)
 - **2026-08-14 12:20 (KST)** — index.js 업데이트 (`65b2abb`)
 - **2026-08-14 12:14 (KST)** — index.js 업데이트 (`82c111d`)
 - **2026-08-12 12:07 (KST)** — fix(insights): 인용 수치 기준 시점 3개월 이내 검증 규칙 추가 (#133) (`b10e0e3`)
