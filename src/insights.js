@@ -22,6 +22,31 @@ function isoWeek(d) {
   return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, "0")}`;
 }
 
+// 카드 date 문자열("2026.06"·"2026.06.23"·"2026-06"·"2025")에서 연·월을 뽑아 월 인덱스로 변환.
+// 월을 특정할 수 없으면(연도만 표기 등) null → 보수적으로 노출 대상에서 제외한다.
+function parseCardMonth(s) {
+  if (typeof s !== "string") return null;
+  const m = s.match(/(20\d{2})\s*[.\-/\uB144]\s*(\d{1,2})/);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]);
+  if (!(mo >= 1 && mo <= 12)) return null;
+  return y * 12 + (mo - 1);
+}
+
+// 리서치 인사이트 카드 노출 필터: 당월 포함 최근 N개월(기본 3) 발행분만 통과.
+// 예) 오늘이 2026-08이면 2026.06 ~ 2026.08 카드만 남긴다. 월 미상 카드는 제외.
+// index.js의 loadInsights(R2 피드·SEED 양쪽)와 curateInsights(저장 직전) 두 지점에서 함께 사용.
+export function filterRecentInsights(cards, months = 3, now = new Date()) {
+  if (!Array.isArray(cards)) return [];
+  const kst = new Date(now.getTime() + 9 * 36e5); // KST 기준 당월 산정
+  const cur = kst.getUTCFullYear() * 12 + kst.getUTCMonth();
+  const min = cur - (Math.max(1, months) - 1);
+  return cards.filter(c => {
+    const k = parseCardMonth(c && c.date);
+    return k !== null && k >= min && k <= cur + 1; // 미래 표기 1개월까지는 오차 허용
+  });
+}
+
 // McKinsey 전사 RSS → [{title,url,date,summary}] (URL 경로로 DA 인접 토픽 우선 정렬)
 async function fetchMckinseyRss(limit = 20) {
   try {
@@ -64,6 +89,7 @@ async function curateInsights(env, candidates) {
         "글로벌 컨설팅사(McKinsey·BCG·Deloitte·Bain·Accenture·PwC·Kearney·Roland Berger·Oliver Wyman)와 한국은행(경제전망·금융안정보고서·BOK 이슈노트·소비자동향조사)의 '최근 약 1개월 내' 발행물 중, DA 기획에 유용한 것 6개를 고른다.",
         "DA 관련 우선순위: 생활가전·스마트홈·AI가전·HVAC/공조·빌트인·구독/렌탈(HaaS)·소비지출·소비심리·내구재수요·프리미엄·D2C·미국주택시장·관세/공급망·원자재·경쟁사(LG전자 등).",
         "제공된 McKinsey RSS 후보를 우선 검토하고, web_search로 한국은행 최근 발표(소비자심리 CCSI·기업경기 BSI·수입물가·이슈노트)와 타 컨설팅 최신분을 보강해 발행일·수치를 확인한다. 발행일이 오래됐거나 불확실하면 제외한다.",
+        "★발행일 상한★: 카드의 date는 반드시 오늘 기준 당월 포함 최근 3개월 이내여야 하며(예: 오늘이 2026-08이면 2026.06 이후), 그 밖은 제외한다. 연도만 쓰지 말고 반드시 'YYYY.MM' 또는 'YYYY.MM.DD'로 표기한다.",
         "★수치 기준 시점 검증(발행일과 별개)★: 카드의 stat·cap이 인용하는 수치가 실제로 가리키는 기준 시점(예: CCSI라면 몇 월 자료인지)을 확인해, 오늘 기준 최근 3개월 이내(예: 오늘이 2026-07이면 2026-05 이후) 자료가 아니면 그 카드는 제외한다. 보고서·기사의 발행일이 최근이어도, 인용된 수치 자체가 3개월을 넘는 과거 자료(재게시·구버전 캐시 등)이면 동일하게 제외한다.",
         "Deloitte는 한국어 허브(deloitte.com/kr)를 우선 탐색한다 — 월간 Trend Tracker(/kr/ko/our-thinking/Monthly-Trend-Tracker/, '이번 달 발간분' 인덱스)·주간 글로벌 경제리뷰(/kr/ko/our-thinking/global-economic-review/, 매주 금요일·발행일 명확)·Consumer Signals(분기, 국내 소비심리)에서 최근 1개월 발행분을 확인하고, 국내 시사점이 담긴 한국어 리포트를 우선한다. domain은 deloitte.com으로 표기.",
         "6개 중 최소 1개는 source를 '균형 관점'으로 두어, 나머지 카드의 낙관적 서술에 대한 반대·신중 근거(예: 'AI 생산성 효과는 아직 불명확')를 담는다.",
@@ -98,8 +124,10 @@ async function curateInsights(env, candidates) {
     impl: clamp(c.impl, 120),
     url: https(c.url),
     image: https(c.image),
-  })).filter(c => c.title).slice(0, 6);
-  return cards.length ? cards : null;
+  }));
+  // 발행일 최근 3개월(당월 포함) 이내만 저장 — 프롬프트 준수 실패 시의 2차 방어선.
+  const fresh = filterRecentInsights(cards.filter(c => c.title)).slice(0, 6);
+  return fresh.length ? fresh : null;
 }
 
 // 메인: 주간 가드 → RSS 후보 → Claude 큐레이션 → R2 저장. opts.force로 가드 무시.
