@@ -47,6 +47,18 @@ export function filterRecentInsights(cards, months = 3, now = new Date()) {
   });
 }
 
+// 한국은행 링크 정규화 — 큐레이션 모델이 게시판 상세글(view.do?nttId=)을 고를 때
+// 같은 게시판의 과거 연도 글로 잘못 연결되는 사례가 있었다(2026.07 카드 → 2024.07 보도자료).
+// 수치·발행일이 맞아도 링크만 틀리는 유형이라 날짜 필터로는 못 걸러지므로,
+// 상세글 링크는 항상 해당 게시판의 목록 페이지로 강등한다(코드 SEED가 쓰던 검증된 URL).
+const BOK_PRESS_LIST = "https://www.bok.or.kr/portal/bbs/B0000338/list.do?menuNo=200091"; // 보도자료
+const BOK_NOTE_LIST = "https://www.bok.or.kr/portal/bbs/P0002454/list.do?menuNo=200433";  // BOK 이슈노트
+function normalizeBokUrl(u, hint = "") {
+  if (!/^https:\/\/[^/]*bok\.or\.kr\//i.test(u)) return u;   // 한국은행 외 도메인은 그대로
+  if (!/\/view\.do|[?&]nttId=/i.test(u)) return u;             // 이미 목록·정적 페이지면 유지
+  return (/P0002454/.test(u) || /\uc774\uc288\ub178\ud2b8/.test(hint)) ? BOK_NOTE_LIST : BOK_PRESS_LIST;
+}
+
 // McKinsey 전사 RSS → [{title,url,date,summary}] (URL 경로로 DA 인접 토픽 우선 정렬)
 async function fetchMckinseyRss(limit = 20) {
   try {
@@ -89,6 +101,7 @@ async function curateInsights(env, candidates) {
         "글로벌 컨설팅사(McKinsey·BCG·Deloitte·Bain·Accenture·PwC·Kearney·Roland Berger·Oliver Wyman)와 한국은행(경제전망·금융안정보고서·BOK 이슈노트·소비자동향조사)의 '최근 약 1개월 내' 발행물 중, DA 기획에 유용한 것 6개를 고른다.",
         "DA 관련 우선순위: 생활가전·스마트홈·AI가전·HVAC/공조·빌트인·구독/렌탈(HaaS)·소비지출·소비심리·내구재수요·프리미엄·D2C·미국주택시장·관세/공급망·원자재·경쟁사(LG전자 등).",
         "제공된 McKinsey RSS 후보를 우선 검토하고, web_search로 한국은행 최근 발표(소비자심리 CCSI·기업경기 BSI·수입물가·이슈노트)와 타 컨설팅 최신분을 보강해 발행일·수치를 확인한다. 발행일이 오래됐거나 불확실하면 제외한다.",
+        "한국은행(bok.or.kr) 카드는 개별 게시글 상세 링크(view.do?nttId=) 대신 보도자료·이슈노트 목록 페이지 URL을 쓴다 — 같은 게시판의 과거 연도 글로 잘못 연결되는 사례가 있었다.",
         "★발행일 상한★: 카드의 date는 반드시 오늘 기준 당월 포함 최근 3개월 이내여야 하며(예: 오늘이 2026-08이면 2026.06 이후), 그 밖은 제외한다. 연도만 쓰지 말고 반드시 'YYYY.MM' 또는 'YYYY.MM.DD'로 표기한다.",
         "★수치 기준 시점 검증(발행일과 별개)★: 카드의 stat·cap이 인용하는 수치가 실제로 가리키는 기준 시점(예: CCSI라면 몇 월 자료인지)을 확인해, 오늘 기준 최근 3개월 이내(예: 오늘이 2026-07이면 2026-05 이후) 자료가 아니면 그 카드는 제외한다. 보고서·기사의 발행일이 최근이어도, 인용된 수치 자체가 3개월을 넘는 과거 자료(재게시·구버전 캐시 등)이면 동일하게 제외한다.",
         "Deloitte는 한국어 허브(deloitte.com/kr)를 우선 탐색한다 — 월간 Trend Tracker(/kr/ko/our-thinking/Monthly-Trend-Tracker/, '이번 달 발간분' 인덱스)·주간 글로벌 경제리뷰(/kr/ko/our-thinking/global-economic-review/, 매주 금요일·발행일 명확)·Consumer Signals(분기, 국내 소비심리)에서 최근 1개월 발행분을 확인하고, 국내 시사점이 담긴 한국어 리포트를 우선한다. domain은 deloitte.com으로 표기.",
@@ -122,7 +135,7 @@ async function curateInsights(env, candidates) {
     stat: clamp(c.stat, 16),
     cap: clamp(c.cap, 90),
     impl: clamp(c.impl, 120),
-    url: https(c.url),
+    url: normalizeBokUrl(https(c.url), `${c.source || ""} ${c.title || ""}`),
     image: https(c.image),
   }));
   // 발행일 최근 3개월(당월 포함) 이내만 저장 — 프롬프트 준수 실패 시의 2차 방어선.
