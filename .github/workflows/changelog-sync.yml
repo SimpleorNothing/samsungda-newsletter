@@ -75,4 +75,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$FILE"
           git commit -m "chore: CHANGELOG 자동 갱신 (${SHORT}) [skip ci]"
-          git push
+
+          # guide-sync 등 다른 자동화가 같은 main에 먼저 push해도 재시도하며 rebase 후 반영한다.
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push 경합 감지 — ${attempt}/3 재시도"
+            sleep 2
+          done
+          echo "3회 재시도 후 push 실패" >&2
+          exit 1
