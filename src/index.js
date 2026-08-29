@@ -287,8 +287,8 @@ export default {
       // (2026-07-21 미발송 사고: Too many subrequests). 그래서 실행을 쪼갠다.
       //   06:30 KST = 21:30 UTC → 제작 후 R2 저장
       //   07:00 KST = 22:00 UTC → 저장본을 읽어 발송만
-      //   10:00 KST = 01:00 UTC → 사후 헬스체크(미발송 감지)
-      if (cron === "0 1 * * *") {
+      //   09:00 KST = 00:00 UTC → 사후 헬스체크(미발송 감지 + 자동 복구)
+      if (cron === "0 0 * * *") {
         try { await checkSendHealth(env, { date: kstDate(), kstWeekday, recover: () => sendStored(env) }); }
         catch (e) { console.warn(`[헬스체크 실패] ${String((e && e.message) || e)}`); }
         return;
