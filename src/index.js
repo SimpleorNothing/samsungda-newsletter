@@ -289,7 +289,7 @@ export default {
       //   07:00 KST = 22:00 UTC → 저장본을 읽어 발송만
       //   10:00 KST = 01:00 UTC → 사후 헬스체크(미발송 감지)
       if (cron === "0 1 * * *") {
-        try { await checkSendHealth(env, { date: kstDate(), kstWeekday }); }
+        try { await checkSendHealth(env, { date: kstDate(), kstWeekday, recover: () => sendStored(env) }); }
         catch (e) { console.warn(`[헬스체크 실패] ${String((e && e.message) || e)}`); }
         return;
       }
@@ -364,7 +364,8 @@ export default {
     if (url.pathname === "/health-check") {
       if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
         return new Response("forbidden", { status: 403 });
-      return json(await checkSendHealth(env, { date: url.searchParams.get("d") || kstDate(), kstWeekday }));
+      const hcDate = url.searchParams.get("d") || kstDate();
+      return json(await checkSendHealth(env, { date: hcDate, kstWeekday, recover: () => sendStored(env, { date: hcDate }) }));
     }
     if (url.pathname === "/subscribers") {
       if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
