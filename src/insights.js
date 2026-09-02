@@ -47,16 +47,28 @@ export function filterRecentInsights(cards, months = 3, now = new Date()) {
   });
 }
 
-// 한국은행 링크 정규화 — 큐레이션 모델이 게시판 상세글(view.do?nttId=)을 고를 때
-// 같은 게시판의 과거 연도 글로 잘못 연결되는 사례가 있었다(2026.07 카드 → 2024.07 보도자료).
-// 수치·발행일이 맞아도 링크만 틀리는 유형이라 날짜 필터로는 못 걸러지므로,
-// 상세글 링크는 항상 해당 게시판의 목록 페이지로 강등한다(코드 SEED가 쓰던 검증된 URL).
-const BOK_PRESS_LIST = "https://www.bok.or.kr/portal/bbs/B0000338/list.do?menuNo=200091"; // 보도자료
-const BOK_NOTE_LIST = "https://www.bok.or.kr/portal/bbs/P0002454/list.do?menuNo=200433";  // BOK 이슈노트
-function normalizeBokUrl(u, hint = "") {
-  if (!/^https:\/\/[^/]*bok\.or\.kr\//i.test(u)) return u;   // 한국은행 외 도메인은 그대로
-  if (!/\/view\.do|[?&]nttId=/i.test(u)) return u;             // 이미 목록·정적 페이지면 유지
-  return (/P0002454/.test(u) || /\uc774\uc288\ub178\ud2b8/.test(hint)) ? BOK_NOTE_LIST : BOK_PRESS_LIST;
+// 원문 링크 실시간 검증 — 큐레이션 모델이 지어낸 게시판 코드(존재하지 않는 board id)나
+// 죽은 링크, 같은 게시판의 엉뚱한 과거 글로 잘못 연결하는 사례를 잡아낸다.
+// 정책(2026-09-02 개정): 링크를 대체 URL(게시판 목록 등)로 강등하지 않는다 — 확인 안 되면
+// 카드 자체를 뉴스레터에서 제외한다. 상세글(view.do?nttId=) 링크는 이제 허용하되,
+// 응답 본문에 카드 발행연도가 실제로 등장하는지까지 대조해 "다른 글로 오연결" 사례를 추가로 거른다.
+async function verifyUrl(url, dateHint = "") {
+  if (!url) return false;
+  try {
+    const res = await fetch(url, { headers: UA.headers, redirect: "follow" });
+    if (!res.ok) return false; // 404/410/500 등 = 연결 안 됨
+    const isDetailPage = /\/view\.do|[?&]nttId=/i.test(url);
+    if (isDetailPage) {
+      const ym = typeof dateHint === "string" ? dateHint.match(/(20\d{2})/) : null;
+      if (ym) {
+        const text = await res.text();
+        if (!text.includes(ym[1])) return false; // 카드 발행연도가 본문에 없음 → 오연결 의심, 제외
+      }
+    }
+    return true;
+  } catch {
+    return false; // 타임아웃/네트워크 오류도 "연결 안 됨"과 동일하게 취급
+  }
 }
 
 // McKinsey 전사 RSS → [{title,url,date,summary}] (URL 경로로 DA 인접 토픽 우선 정렬)
@@ -101,7 +113,7 @@ async function curateInsights(env, candidates) {
         "글로벌 컨설팅사(McKinsey·BCG·Deloitte·Bain·Accenture·PwC·Kearney·Roland Berger·Oliver Wyman)와 한국은행(경제전망·금융안정보고서·BOK 이슈노트·소비자동향조사)의 '최근 약 1개월 내' 발행물 중, DA 기획에 유용한 것 6개를 고른다.",
         "DA 관련 우선순위: 생활가전·스마트홈·AI가전·HVAC/공조·빌트인·구독/렌탈(HaaS)·소비지출·소비심리·내구재수요·프리미엄·D2C·미국주택시장·관세/공급망·원자재·경쟁사(LG전자 등).",
         "제공된 McKinsey RSS 후보를 우선 검토하고, web_search로 한국은행 최근 발표(소비자심리 CCSI·기업경기 BSI·수입물가·이슈노트)와 타 컨설팅 최신분을 보강해 발행일·수치를 확인한다. 발행일이 오래됐거나 불확실하면 제외한다.",
-        "한국은행(bok.or.kr) 카드는 개별 게시글 상세 링크(view.do?nttId=) 대신 보도자료·이슈노트 목록 페이지 URL을 쓴다 — 같은 게시판의 과거 연도 글로 잘못 연결되는 사례가 있었다.",
+        "한국은행(bok.or.kr) 카드는 web_search로 실제로 확인한 정확한 원문 상세 링크(view.do?nttId=...)를 써라. board id·menuNo·nttId 어느 것도 추측·창작하지 말 것 — 검색 결과에 실제로 뜬 URL을 그대로 사용한다. 시스템이 발행 후 이 링크가 실제로 열리는지, 본문에 카드 발행연도가 맞게 등장하는지 자동 검증하며, 검증에 실패하면 그 카드는 뉴스레터에서 통째로 제외된다 — 확신 없는 링크보다는 확실한 목록 페이지 URL을 쓰는 편이 안전하다.",
         "★발행일 상한★: 카드의 date는 반드시 오늘 기준 당월 포함 최근 3개월 이내여야 하며(예: 오늘이 2026-08이면 2026.06 이후), 그 밖은 제외한다. 연도만 쓰지 말고 반드시 'YYYY.MM' 또는 'YYYY.MM.DD'로 표기한다.",
         "★수치 기준 시점 검증(발행일과 별개)★: 카드의 stat·cap이 인용하는 수치가 실제로 가리키는 기준 시점(예: CCSI라면 몇 월 자료인지)을 확인해, 오늘 기준 최근 3개월 이내(예: 오늘이 2026-07이면 2026-05 이후) 자료가 아니면 그 카드는 제외한다. 보고서·기사의 발행일이 최근이어도, 인용된 수치 자체가 3개월을 넘는 과거 자료(재게시·구버전 캐시 등)이면 동일하게 제외한다.",
         "Deloitte는 한국어 허브(deloitte.com/kr)를 우선 탐색한다 — 월간 Trend Tracker(/kr/ko/our-thinking/Monthly-Trend-Tracker/, '이번 달 발간분' 인덱스)·주간 글로벌 경제리뷰(/kr/ko/our-thinking/global-economic-review/, 매주 금요일·발행일 명확)·Consumer Signals(분기, 국내 소비심리)에서 최근 1개월 발행분을 확인하고, 국내 시사점이 담긴 한국어 리포트를 우선한다. domain은 deloitte.com으로 표기.",
@@ -135,11 +147,15 @@ async function curateInsights(env, candidates) {
     stat: clamp(c.stat, 16),
     cap: clamp(c.cap, 90),
     impl: clamp(c.impl, 120),
-    url: normalizeBokUrl(https(c.url), `${c.source || ""} ${c.title || ""}`),
+    url: https(c.url),
     image: https(c.image),
-  }));
+  })).filter(c => c.title && c.url);
+  // 원문 링크 실시간 검증 — 연결 안 되거나(404/타임아웃) 상세글 본문이 발행연도와 안 맞으면
+  // 대체 링크로 강등하지 않고 카드 자체를 제외한다(정책 2026-09-02).
+  const checked = await Promise.all(cards.map(async c => (await verifyUrl(c.url, c.date)) ? c : null));
+  const verified = checked.filter(Boolean);
   // 발행일 최근 3개월(당월 포함) 이내만 저장 — 프롬프트 준수 실패 시의 2차 방어선.
-  const fresh = filterRecentInsights(cards.filter(c => c.title)).slice(0, 6);
+  const fresh = filterRecentInsights(verified).slice(0, 6);
   return fresh.length ? fresh : null;
 }
 
