@@ -3,12 +3,13 @@
 // B안 리서치 인사이트의 "주1회 15개 풀 → 요일별 3개" 노출을 대형 src/index.js 수정 없이 적용한다.
 // 기존 worker의 데이터 수집/발송 로직은 그대로 사용하고, R2에 저장되는 뉴스레터 HTML에서 기존
 // 수/금 전용 리서치 섹션을 제거한 뒤 해당 요일 카드 3개로 교체한다.
+// 리서치 풀 갱신은 월요일 05:30 KST 전용 cron으로 분리해 제작 cron의 서브리퀘스트 한도와 격리한다.
 
 import worker from "./index.js";
 import { refreshInsights, selectDailyInsights } from "./insights.js";
 
 const INSIGHTS_KEY = "signals/insights-feed.json";
-const BUILD_CRON = "30 21 * * *";
+const INSIGHTS_CRON = "30 20 * * 0"; // Sunday 20:30 UTC = Monday 05:30 KST
 const COLORS = {
   surface: "#FFFFFF", text: "#17222D", muted: "#5C6B79", border: "#D3D9D6",
   brand: "#46647E", deep: "#2F614D", amber: "#A9790F", bg: "#EDEFEC",
@@ -35,10 +36,6 @@ function dayKey(dateStr) {
   if (!m) return "";
   const n = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
   return ({ 1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri" })[n] || "";
-}
-
-function isKstMonday() {
-  return new Date(Date.now() + 9 * 36e5).getUTCDay() === 1;
 }
 
 function sourceColor(src) {
@@ -76,8 +73,7 @@ function renderSection(cards, dateStr) {
 }
 
 function existingResearchBounds(html) {
-  const marker = "리서치 인사이트";
-  const p = html.indexOf(marker);
+  const p = html.indexOf("리서치 인사이트");
   if (p < 0) return null;
   const nextIcon = html.indexOf('aria-label="기획 인사이트"', p);
   if (nextIcon < 0) return null;
@@ -161,24 +157,19 @@ function makeRuntimeEnv(env) {
   return { env: wrapped, getFeed };
 }
 
-async function maybeRefreshBeforeBuild(env, cron, pathname) {
-  const buildPath = pathname === "/build";
-  if ((cron === BUILD_CRON || buildPath) && isKstMonday()) {
-    try { await refreshInsights(env); } catch (e) { console.warn(`[B안 인사이트 선갱신 실패] ${String((e && e.message) || e)}`); }
-  }
-}
-
 export default {
   async scheduled(event, env, ctx) {
     const cron = (event && event.cron) || "";
-    await maybeRefreshBeforeBuild(env, cron, "");
+    if (cron === INSIGHTS_CRON) {
+      ctx.waitUntil(refreshInsights(env).catch(e => console.warn(`[B안 인사이트 주간 갱신 실패] ${String((e && e.message) || e)}`)));
+      return;
+    }
     const rt = makeRuntimeEnv(env);
     return worker.scheduled(event, rt.env, ctx);
   },
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    await maybeRefreshBeforeBuild(env, "", url.pathname);
     const rt = makeRuntimeEnv(env);
     const response = await worker.fetch(request, rt.env, ctx);
 
