@@ -718,7 +718,6 @@ h2.sec{font-size:16px;font-weight:700;margin-bottom:12px;letter-spacing:-.2px}
 
   <footer class="foot" id="updFoot">
     <button type="button" class="upd" id="updBtn" aria-expanded="false" aria-controls="updLog">update : ${updLatest} <span class="cev">&#9662;</span></button>
-    <a href="https://samsungda-newsletter.cw120-park.workers.dev/preview" target="_blank" rel="noopener noreferrer" style="display:block;margin-top:10px;font-size:13px;color:#5C6B79;text-decoration:none">coming soon &rarr;</a>
     <div class="log" id="updLog" role="dialog" aria-label="업데이트 내역">
       <div class="log-h"><span>업데이트 내역</span><button type="button" class="log-x" id="updClose" aria-label="닫기">&times;</button></div>
       <ul>${updRows}</ul>
