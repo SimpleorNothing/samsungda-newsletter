@@ -18,7 +18,9 @@ test("BOK 목록 URL은 차단하고 view.do + nttId만 허용한다", () => {
   assert.equal(validateInstitutionDetailUrl("https://www.bok.or.kr/portal/bbs/B0000501/view.do?nttId=11064042&menuNo=201264"), true);
 });
 
-test("통계청/KIEP/KIET 상세 URL 패턴만 허용한다", () => {
+test("국가데이터처/통계청/KIEP/KIET 상세 URL 패턴만 허용한다", () => {
+  assert.equal(validateInstitutionDetailUrl("https://mods.go.kr/board.es?act=view&bid=216&list_no=446690&mid=a10301010000"), true);
+  assert.equal(validateInstitutionDetailUrl("https://mods.go.kr/board.es?bid=216&mid=a10301010000"), false);
   assert.equal(validateInstitutionDetailUrl("https://kostat.go.kr/board.es?mid=a10000000000&bid=123&act=view&list_no=456"), true);
   assert.equal(validateInstitutionDetailUrl("https://kostat.go.kr/board.es?mid=a10000000000&bid=123"), false);
   assert.equal(validateInstitutionDetailUrl("https://www.kiep.go.kr/gallery.es?act=view&bid=0008&list_no=12514&mid=a10105050000"), true);
