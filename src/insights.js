@@ -8,7 +8,7 @@
 const INSIGHTS_KEY = "signals/insights-feed.json";
 const INSIGHTS_STAMP_KEY = "signals/insights-feed.stamp.json";
 const INSIGHTS_HISTORY_KEY = "signals/insights-feed.history.json";
-const INSIGHTS_SCHEMA_VERSION = 2;
+const INSIGHTS_SCHEMA_VERSION = 3;
 const INSIGHTS_DAYS = ["mon", "tue", "wed", "thu", "fri"];
 const INSIGHTS_DAILY_COUNT = 3;
 const INSIGHTS_WEEKLY_COUNT = INSIGHTS_DAYS.length * INSIGHTS_DAILY_COUNT;
@@ -67,7 +67,7 @@ function hostIs(host, domain) {
 
 // 공공기관 URL의 "상세 글" 형태를 기계적으로 검증한다.
 // - BOK: view.do + nttId
-// - 통계청: board.es + act=view + list_no
+// - 통계청/국가데이터처: board.es + act=view + list_no
 // - KIEP: gallery.es + act=view + list_no
 // - KIET: *View 상세 endpoint + 문서 식별자(idx / *_no / list_no / seq 등)
 // 일반 컨설팅/리서치 도메인은 이 형태 검증 대상이 아니며 실제 HTTP 응답 검증만 수행한다.
@@ -82,7 +82,7 @@ export function validateInstitutionDetailUrl(url) {
   if (hostIs(host, "bok.or.kr")) {
     return /\/view\.do$/i.test(path) && !!p.get("nttId");
   }
-  if (hostIs(host, "kostat.go.kr")) {
+  if (hostIs(host, "kostat.go.kr") || hostIs(host, "mods.go.kr")) {
     return /\/board\.es$/i.test(path) && String(p.get("act") || "").toLowerCase() === "view" && !!p.get("list_no");
   }
   if (hostIs(host, "kiep.go.kr")) {
@@ -99,7 +99,7 @@ export function validateInstitutionDetailUrl(url) {
 function isInstitutionUrl(url) {
   try {
     const h = new URL(url).hostname.toLowerCase();
-    return ["bok.or.kr", "kostat.go.kr", "kiep.go.kr", "kiet.re.kr"].some(d => hostIs(h, d));
+    return ["bok.or.kr", "kostat.go.kr", "mods.go.kr", "kiep.go.kr", "kiet.re.kr"].some(d => hostIs(h, d));
   } catch { return false; }
 }
 
@@ -215,7 +215,7 @@ async function curateInsights(env, candidates, history) {
         "삼성전자 생활가전(DA) 기획팀 데일리 뉴스레터의 '리서치 인사이트'를 B안(주1회 풀 큐레이션 + 요일별 부분표시)으로 만든다.",
         "이번 주에 사용할 카드 15개를 정확히 만든다. day는 mon/tue/wed/thu/fri를 각각 정확히 3개씩 배정한다. 같은 URL·같은 리포트를 요일만 바꿔 중복 사용하지 않는다.",
         "요일별 편성은 다음과 같다.",
-        "- mon 국내 거시·산업경기: 한국은행(BOK), 산업연구원(KIET), 통계청을 우선. 소비·산업생산·내수·물가·경기·주택·수출입 등 DA 수요와 연결되는 자료.",
+        "- mon 국내 거시·산업경기: 한국은행(BOK), 산업연구원(KIET), 국가데이터처(구 통계청)를 우선. 소비·산업생산·내수·물가·경기·주택·수출입 등 DA 수요와 연결되는 자료.",
         "- tue 글로벌 경쟁전략: McKinsey, BCG, PwC, Accenture, Kearney, Roland Berger. 기업전략·AI·운영·제조·가격·서비스 모델 등. Oliver Wyman은 제외.",
         "- wed 소비자·유통 트렌드: Deloitte, Bain, NielsenIQ, GfK, Circana/NPD, Statista Insights. 소비심리·카테고리 지출·리테일·D2C·프리미엄/가성비·구매행동.",
         "- thu 신사업 기회 + 글로벌 거시: McKinsey/BCG의 AI홈·구독·로보틱스·스마트홈, KIEP, OECD Economic Outlook/관련 분석, IMF Blog/분석. 관세·공급망·무역·신사업을 우선.",
@@ -225,7 +225,7 @@ async function curateInsights(env, candidates, history) {
         "수치(stat/cap)는 리포트가 실제로 말하는 수치만 쓰며 그 수치의 기준 시점도 최근 3개월인지 확인한다. 수치가 없으면 stat/cap을 빈 문자열로 둬도 된다. 확인되지 않은 숫자는 만들지 않는다.",
         "★원문 링크 원칙★: URL은 검색 결과에서 실제로 확인한 '개별 원문/상세 글' 주소만 사용한다. 목록·검색·메인·허브 페이지로 대체하지 않는다. 정확한 상세 URL을 못 찾으면 그 카드를 포기하고 다른 리포트로 교체한다.",
         "★BOK★ bok.or.kr은 반드시 /view.do 경로이면서 nttId 파라미터가 있는 실제 상세글 URL이어야 한다. list.do·search.do·main.do 금지.",
-        "★통계청★ kostat.go.kr은 반드시 board.es? ... &act=view&list_no=... 형태의 실제 상세글 URL이어야 한다. board 목록·검색 URL 금지.",
+        "★국가데이터처/통계청★ 최신 자료는 mods.go.kr을 우선 검색하고, mods.go.kr 또는 kostat.go.kr의 board.es?...&act=view&list_no=... 형태 실제 상세글 URL만 사용한다. board 목록·검색 URL 금지.",
         "★KIEP★ kiep.go.kr은 반드시 gallery.es?act=view&...&list_no=... 형태의 실제 발간물 상세 URL을 쓴다. menu.es나 목록 URL 금지.",
         "★KIET★ kiet.re.kr은 검색 결과에서 확인한 *View 상세 endpoint(예: trends/ecolookView?ecolook_no=...)와 고유 문서 식별자가 있는 URL만 사용한다. *List나 상위 메뉴 URL 금지.",
         "McKinsey RSS 후보는 우선 검토하되 RSS URL이 개별 리포트가 아닌 허브면 쓰지 말고 web_search로 개별 원문을 확인한다.",
