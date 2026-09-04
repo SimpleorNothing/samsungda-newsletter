@@ -9,7 +9,7 @@ import worker from "./index.js";
 import { refreshInsights, selectDailyInsights } from "./insights.js";
 
 const INSIGHTS_KEY = "signals/insights-feed.json";
-const INSIGHTS_CRON = "30 20 * * 0"; // Sunday 20:30 UTC = Monday 05:30 KST
+const INSIGHTS_CRON = "30 20 * * SUN"; // Sunday 20:30 UTC = Monday 05:30 KST
 const COLORS = {
   surface: "#FFFFFF", text: "#17222D", muted: "#5C6B79", border: "#D3D9D6",
   brand: "#46647E", deep: "#2F614D", amber: "#A9790F", bg: "#EDEFEC",
