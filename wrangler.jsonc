@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "samsungda-newsletter",
-  "main": "src/index.js",
+  "main": "src/entry.js",
   "compatibility_date": "2025-06-01",
   "r2_buckets": [
     { "binding": "RESEARCH", "bucket_name": "samsungda-research" }
@@ -10,7 +10,7 @@
   //   30 21 * * *  = 06:30 KST  제작(gatherData·렌더·R2 저장) + 인사이트 갱신
   //   0  22 * * *  = 07:00 KST  저장본 발송 + 발송 리포트
   //   0  0  * * *  = 09:00 KST  헬스체크(리포트 부재 시 경보 + 자동 복구 발송)
-  // 분기는 src/index.js 의 scheduled(event.cron)에서 처리한다.
+  // 엔트리는 src/entry.js. 실제 cron 역할 분기는 기존 src/index.js의 scheduled(event.cron)을 그대로 위임한다.
   "triggers": {
     "crons": ["30 21 * * *", "0 22 * * *", "0 0 * * *"]
   },
