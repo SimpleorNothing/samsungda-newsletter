@@ -337,6 +337,21 @@ export default {
         return new Response("forbidden", { status: 403 });
       return json(await refreshInsights(env, { force: url.searchParams.get("force") !== "0" }));
     }
+    // [인사이트 조회 전용] R2에 저장된 리서치 인사이트 풀(현재 최대 15장, day 태그 포함)을 그대로 JSON으로 반환.
+    // 발송 로직과 무관한 읽기 전용 점검용 — 어떤 자료가 큐레이션됐는지 확인할 때 사용.
+    if (url.pathname === "/insights-debug") {
+      if (!env.TRIGGER_KEY || url.searchParams.get("key") !== env.TRIGGER_KEY)
+        return new Response("forbidden", { status: 403 });
+      if (!env.RESEARCH) return json({ ok: false, error: "no_r2" });
+      try {
+        const o = await env.RESEARCH.get(INSIGHTS_KEY);
+        if (!o) return json({ ok: false, error: "not_found", key: INSIGHTS_KEY });
+        const cards = await o.json();
+        return json({ ok: true, count: Array.isArray(cards) ? cards.length : 0, cards });
+      } catch (e) {
+        return json({ ok: false, error: String((e && e.message) || e) });
+      }
+    }
     // [발송] 저장된 제작본을 발송(제작본 없으면 즉시 제작 폴백). 서브리퀘스트 절약 경로.
     if (url.pathname === "/send") {
       if (env.TRIGGER_KEY && url.searchParams.get("key") !== env.TRIGGER_KEY)
