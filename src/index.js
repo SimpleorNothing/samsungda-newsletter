@@ -17,7 +17,7 @@
 
 import { SCFI_SEED } from "./scfi-seed.js";
 import { TOPIC_CAP, TOPIC_MIN, topicBlocked } from "./diversity.js";
-import { refreshInsights, filterRecentInsights } from "./insights.js";
+import { refreshInsights, filterRecentInsights, selectDailyInsights } from "./insights.js";
 import { CHANGELOG } from "./changelog.js";
 import { runSendWithReconcile, checkSendHealth, getStoredReport } from "./postsend.js";
 
@@ -1676,12 +1676,14 @@ export function renderEmail(data, opts = {}) {
       <div style="font-size:13px;font-weight:700;color:${T.brand};letter-spacing:.02em">${title}${extra ? ` <span style="color:${T.muted};font-weight:500">${extra}</span>` : ""}</div>${insight(ins)}
       <div style="margin-top:8px">${body}</div></td></tr>`;
 
-  // 🔬 리서치 인사이트(컨설팅·한국은행 보고서) — 발송은 수/금(C유형), preview(sample)는 요일 무관 항상 노출. 로고=favicon, 출처색은 CI 팔레트로 구분.
-  const insDow = kstWeekday(data.date);
-  const showIns = opts.sample || insDow === "수" || insDow === "금";
+  // 🔬 리서치 인사이트(컨설팅·한국은행 보고서) — B안: R2 풀에 day 태그(mon~fri)가 있으면 그날 3개만 노출(평일 매일).
+  // 레거시 SEED(day 태그 없음)로 폴백된 경우엔 이전처럼 요일 무관 최대 6개를 그대로 노출 — 완전 공백보다 낫다.
   const insList = Array.isArray(data.insights) ? data.insights : [];
+  const hasDayTags = insList.length > 0 && insList.every(it => it && it.day);
+  const insToday = hasDayTags ? selectDailyInsights(insList, data.date) : insList;
+  const showIns = opts.sample || insToday.length > 0;
   const srcCol = src => (src && src.indexOf("한국은행") >= 0) ? T.deep : ((src && src.indexOf("균형") >= 0) ? T.amber : T.brand);
-  const insCards = insList.slice(0, 6).map(it => {
+  const insCards = insToday.slice(0, 6).map(it => {
     const col = srcCol(it.source);
     const logo = it.domain ? `<img src="https://www.google.com/s2/favicons?sz=64&domain=${esc(it.domain)}" width="15" height="15" alt="" style="vertical-align:middle;border-radius:3px;margin-right:6px">` : "";
     const stat = it.stat ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:9px 0"><tr><td style="padding:9px 11px;background:${T.bg};border-radius:8px"><span style="font-size:18px;font-weight:800;color:${col};vertical-align:middle">${esc(it.stat)}</span> <span style="font-size:12px;color:${T.muted};line-height:1.5">${esc(it.cap || "")}</span></td></tr></table>` : "";
