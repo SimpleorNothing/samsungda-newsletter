@@ -1,15 +1,15 @@
 // src/entry.js — 뉴스레터 엔트리 래퍼
 //
-// B안 리서치 인사이트의 "주1회 15개 풀 → 요일별 3개" 노출을 대형 src/index.js 수정 없이 적용한다.
-// 기존 worker의 데이터 수집/발송 로직은 그대로 사용하고, R2에 저장되는 뉴스레터 HTML에서 기존
-// 수/금 전용 리서치 섹션을 제거한 뒤 해당 요일 카드 3개로 교체한다.
-// 리서치 풀 갱신은 월요일 05:30 KST 전용 cron으로 분리해 제작 cron의 서브리퀘스트 한도와 격리한다.
+// B안 리서치 인사이트의 "주1회 15개 풀 → 요일별 3개" 노출을 보장한다.
+// R2에 구형 6장 피드가 남아 있어도 런타임에서는 사용하지 않고, 정상 B안 피드 또는
+// 최근 3개월 내의 검증된 bootstrap 15장으로 치환한다.
 
 import worker from "./index.js";
-import { refreshInsights, selectDailyInsights } from "./insights.js";
+import { refreshInsights, selectDailyInsights, isCompleteBPlanFeed } from "./insights.js";
+import { INSIGHTS_BOOTSTRAP } from "./insights-bootstrap.js";
 
 const INSIGHTS_KEY = "signals/insights-feed.json";
-const INSIGHTS_CRON = "30 20 * * SUN"; // Sunday 20:30 UTC = Monday 05:30 KST
+const INSIGHTS_CRON = "30 20 * * SUN"; // Monday 05:30 KST
 const COLORS = {
   surface: "#FFFFFF", text: "#17222D", muted: "#5C6B79", border: "#D3D9D6",
   brand: "#46647E", deep: "#2F614D", amber: "#A9790F", bg: "#EDEFEC",
@@ -40,8 +40,14 @@ function dayKey(dateStr) {
 
 function sourceColor(src) {
   if (String(src || "").includes("균형")) return COLORS.amber;
-  if (/(한국은행|산업연구원|통계청|KIEP|대외경제)/i.test(String(src || ""))) return COLORS.deep;
+  if (/(한국은행|산업연구원|국가데이터처|통계청|KIEP|대외경제)/i.test(String(src || ""))) return COLORS.deep;
   return COLORS.brand;
+}
+
+function runtimeFeed(feed) {
+  if (isCompleteBPlanFeed(feed)) return feed;
+  if (isCompleteBPlanFeed(INSIGHTS_BOOTSTRAP)) return INSIGHTS_BOOTSTRAP;
+  return [];
 }
 
 function renderCard(it) {
@@ -88,36 +94,47 @@ function insertPoint(html) {
   return html.lastIndexOf("<tr><td", icon);
 }
 
-function applyDailyInsights(html, key, feed) {
-  if (!Array.isArray(feed) || !feed.some(c => c && c.day)) return html;
+export function applyDailyInsights(html, key, feed) {
   const dateStr = dateFromKeyOrHtml(key, html);
   const dk = dayKey(dateStr);
   if (!dk) return html;
-  const cards = selectDailyInsights(feed, dk);
-  if (cards.length !== 3) return html;
 
+  const safeFeed = runtimeFeed(feed);
   let base = html;
-  const b = existingResearchBounds(base);
-  if (b) base = base.slice(0, b.start) + base.slice(b.end);
+  const old = existingResearchBounds(base);
+  if (old) base = base.slice(0, old.start) + base.slice(old.end);
+
+  // 신규 B안 피드조차 확보되지 않으면 구형 섹션은 제거한 상태로 반환한다.
+  // 잘못된 6장/수금 포맷을 다시 노출하는 것보다 명시적 공백이 안전하다.
+  if (!isCompleteBPlanFeed(safeFeed)) return base;
+
+  const cards = selectDailyInsights(safeFeed, dk);
+  if (cards.length !== 3) return base;
   const at = insertPoint(base);
-  if (at < 0) return html;
+  if (at < 0) return base;
   return base.slice(0, at) + renderSection(cards, dateStr) + base.slice(at);
 }
 
 function makeRuntimeEnv(env) {
   const target = env.RESEARCH;
-  if (!target) return { env, getFeed: async () => [] };
+  if (!target) return { env, getFeed: async () => runtimeFeed([]) };
   let cachedFeed = null;
 
   const getFeed = async () => {
     if (Array.isArray(cachedFeed)) return cachedFeed;
     try {
       const o = await target.get(INSIGHTS_KEY);
-      if (!o) return [];
+      if (!o) {
+        cachedFeed = runtimeFeed([]);
+        return cachedFeed;
+      }
       const a = await o.json();
-      cachedFeed = Array.isArray(a) ? a : [];
+      cachedFeed = runtimeFeed(Array.isArray(a) ? a : []);
       return cachedFeed;
-    } catch { return []; }
+    } catch {
+      cachedFeed = runtimeFeed([]);
+      return cachedFeed;
+    }
   };
 
   const bucket = new Proxy(target, {
@@ -129,8 +146,8 @@ function makeRuntimeEnv(env) {
           get(ro, rp) {
             if (rp === "json") return async () => {
               const a = await ro.json();
-              cachedFeed = Array.isArray(a) ? a : [];
-              return a;
+              cachedFeed = runtimeFeed(Array.isArray(a) ? a : []);
+              return cachedFeed;
             };
             const v = ro[rp];
             return typeof v === "function" ? v.bind(ro) : v;
@@ -143,7 +160,10 @@ function makeRuntimeEnv(env) {
           v = applyDailyInsights(v, key, await getFeed());
         }
         if (key === INSIGHTS_KEY && typeof value === "string") {
-          try { const a = JSON.parse(value); if (Array.isArray(a)) cachedFeed = a; } catch { /* ignore */ }
+          try {
+            const a = JSON.parse(value);
+            cachedFeed = runtimeFeed(Array.isArray(a) ? a : []);
+          } catch { cachedFeed = runtimeFeed([]); }
         }
         return obj.put(key, v, options);
       };
@@ -161,7 +181,10 @@ export default {
   async scheduled(event, env, ctx) {
     const cron = (event && event.cron) || "";
     if (cron === INSIGHTS_CRON) {
-      ctx.waitUntil(refreshInsights(env).catch(e => console.warn(`[B안 인사이트 주간 갱신 실패] ${String((e && e.message) || e)}`)));
+      ctx.waitUntil((async () => {
+        const result = await refreshInsights(env);
+        console.log(`[B안 인사이트 주간 갱신] ${JSON.stringify(result)}`);
+      })().catch(e => console.warn(`[B안 인사이트 주간 갱신 실패] ${String((e && e.message) || e)}`)));
       return;
     }
     const rt = makeRuntimeEnv(env);
