@@ -10,11 +10,12 @@ import { INSIGHTS_BOOTSTRAP } from "./insights-bootstrap.js";
 
 const INSIGHTS_KEY = "signals/insights-feed.json";
 const INSIGHTS_CRON = "30 20 * * SUN"; // Monday 05:30 KST
-// 07:00 발송 cron("0 22 * * *")이 실행되지 않는 경우가 있어(2026-09-10: Cloudflare가 트리거를
-// 스킵 — 에러 없이 발송 누락) 15분 뒤 보조 헬스체크를 돌린다. index.js는 "0 0 * * *"를 헬스체크
-// 분기로 쓰므로, index.js를 수정하지 않고 같은 분기로 재라우팅한다.
-const HEALTH_RECHECK_CRON = "15 22 * * *"; // 07:15 KST — 발송 누락 조기 복구
-const HEALTH_CRON = "0 0 * * *";           // index.js 헬스체크 분기(정규 실행은 09:00 KST)
+// 헬스체크를 09:00 KST에서 07:15 KST로 앞당겼다 — 2026-09-10 07:00 발송 cron이 에러 없이
+// 미실행돼(Cloudflare 트리거 스킵) 복구까지 2시간이 걸렸다. cron 개수는 무료 플랜 계정당 5개
+// 한도가 있어 늘리지 않고 시각만 옴긴다. index.js는 "0 0 * * *"를 헬스체크 분기로 쓰므로,
+// index.js를 수정하지 않고 새 시각의 cron을 같은 분기로 재라우팅한다.
+const HEALTH_CRON_ACTUAL = "15 22 * * *"; // 07:15 KST — 실제 등록된 헬스체크 트리거
+const HEALTH_CRON_BRANCH = "0 0 * * *";   // index.js 내부 헬스체크 분기 식별자
 const COLORS = {
   surface: "#FFFFFF", text: "#17222D", muted: "#5C6B79", border: "#D3D9D6",
   brand: "#46647E", deep: "#2F614D", amber: "#A9790F", bg: "#EDEFEC",
@@ -194,9 +195,9 @@ export default {
     }
     // 리포트가 이미 있으면 R2 읽기 1회로 끝나고, 없을 때만 sendStored로 복구 발송한다.
     // 발송은 수신자별 멱등키를 쓰므로 07:00 발송이 지연 실행 중이어도 중복 수신되지 않는다.
-    if (cron === HEALTH_RECHECK_CRON) {
+    if (cron === HEALTH_CRON_ACTUAL) {
       const rtHealth = makeRuntimeEnv(env);
-      const proxied = { cron: HEALTH_CRON, scheduledTime: (event && event.scheduledTime) || Date.now() };
+      const proxied = { cron: HEALTH_CRON_BRANCH, scheduledTime: (event && event.scheduledTime) || Date.now() };
       return worker.scheduled(proxied, rtHealth.env, ctx);
     }
     const rt = makeRuntimeEnv(env);
