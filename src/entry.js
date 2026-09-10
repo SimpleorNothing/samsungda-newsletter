@@ -12,7 +12,7 @@ const INSIGHTS_KEY = "signals/insights-feed.json";
 const INSIGHTS_CRON = "30 20 * * SUN"; // Monday 05:30 KST
 // 헬스체크를 09:00 KST에서 07:15 KST로 앞당겼다 — 2026-09-10 07:00 발송 cron이 에러 없이
 // 미실행돼(Cloudflare 트리거 스킵) 복구까지 2시간이 걸렸다. cron 개수는 무료 플랜 계정당 5개
-// 한도가 있어 늘리지 않고 시각만 옹긴다. index.js는 "0 0 * * *"를 헬스체크 분기로 쓰므로,
+// 한도가 있어 늘리지 않고 시각만 이동한다. index.js는 "0 0 * * *"를 헬스체크 분기로 쓰므로,
 // index.js를 수정하지 않고 새 시각의 cron을 같은 분기로 재라우팅한다.
 const HEALTH_CRON_ACTUAL = "15 22 * * *"; // 07:15 KST — 실제 등록된 헬스체크 트리거
 const HEALTH_CRON_BRANCH = "0 0 * * *";   // index.js 내부 헬스체크 분기 식별자
